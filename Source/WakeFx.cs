@@ -43,6 +43,10 @@ namespace WaterWakes
         private static WakeSettings Cfg => WakeSettings.Current;
 
         private ParticleSystem foam, spray, mist;
+
+        public static WakeFx Instance { get; private set; }
+        /// <summary>The foam particles (OceanFoamPainter renders them into its foam map, on a layer the cameras skip).</summary>
+        public ParticleSystem Foam => foam;
         private Transform foamFrame;
         private readonly Dictionary<Part, Box[]> boxes = new Dictionary<Part, Box[]>();
         private readonly Dictionary<Guid, CraftState> crafts = new Dictionary<Guid, CraftState>();
@@ -52,6 +56,8 @@ namespace WaterWakes
         private ParticleSystem.Particle[] buf;
         private float nextPurge, nextLog;
         private int emittedFoam, emittedSpray, emittedMist;
+
+        private void Awake() => Instance = this;
 
         private void Start()
         {
@@ -114,6 +120,8 @@ namespace WaterWakes
 
         private void OnDestroy()
         {
+            if (Instance == this)
+                Instance = null;
             foreach (ParticleSystem ps in new[] { foam, spray, mist })
                 if (ps != null)
                 {
@@ -496,6 +504,8 @@ namespace WaterWakes
             main.startLifetime = 1;
             main.gravityModifier = 0;
             main.scalingMode = ParticleSystemScalingMode.Hierarchy;
+            // keep simulating when no camera sees them: the foam is on a hidden layer while painted, and trails behind the camera live on
+            main.cullingMode = ParticleSystemCullingMode.AlwaysSimulate;
             if (flatOnWater)
                 main.startRotation3D = true;
             var em = ps.emission;

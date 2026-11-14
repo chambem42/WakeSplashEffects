@@ -98,6 +98,11 @@ namespace WaterWakes
             Slider("Lifetime", ref s.mistLife, 0.5f, 8, "s");
             Slider("Rise speed", ref s.mistRise, 0, 3, "m/s");
 
+            Header("Foam on the waves (Scatterer 0.09+)");
+            s.paintFoam = GUILayout.Toggle(s.paintFoam, " Paint the foam into Scatterer's ocean");
+            Slider("Strength", ref s.paintStrength, 0, 2, "x");
+            Slider("Area around camera", ref s.paintMapSize, 50, 1000, "m");
+
             Header("Window");
             s.hideWithUI = GUILayout.Toggle(s.hideWithUI, " Hide with the UI (F2)");
             s.debugLog = GUILayout.Toggle(s.debugLog, " Log hull detection (KSP.log, every 5 s)");

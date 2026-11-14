@@ -42,6 +42,17 @@ namespace WaterWakes
         [Persistent] public float mistLife = 2.5f;       // s (mean)
         [Persistent] public float mistRise = 0.6f;       // m/s (mean)
 
+        // foam painted on Scatterer's waves (its ocean gbuffer)
+        [Persistent] public bool paintFoam = true;
+        [Persistent] public float paintStrength = 0.4f;
+        [Persistent] public bool paintFlipY = true;       // oceanGbufferDepth is device depth rendered with Y flipped (D3D11)
+        [Persistent] public float paintMapSize = 300f;    // m: the top-down foam map around the camera
+        [Persistent] public int paintMapResolution = 4096;
+        [Persistent] public int paintHook = 1;         // 0 BeforeImageEffectsOpaque, 1 Scatterer's ordered AfterForwardOpaque, 2 AfterForwardOpaque; -1 cycle (debug)
+        [Persistent] public bool paintDebug = false;   // log depth diagnostics every 5 s
+        [Persistent] public bool paintDebugToggle = false;
+        [Persistent] public float paintDebugMode = 0;  // 1: full foam on the left half of the screen; -1: foam wherever the ocean depth reads
+
         // window
         [Persistent] public bool hideWithUI = true;
         [Persistent] public bool openOnStart = false;

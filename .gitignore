@@ -4,3 +4,11 @@ GameData/WaterWakes/Plugins/
 GameData/WaterWakes/PluginData/
 *.user
 .vs/
+Unity/Library/
+Unity/Logs/
+Unity/Temp/
+Unity/UserSettings/
+Unity/obj/
+Unity/build.log
+Unity/*.csproj
+Unity/*.sln

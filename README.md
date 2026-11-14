@@ -17,3 +17,19 @@ MSBuild Source/WaterWakes.csproj -restore -p:Configuration=Release [-p:KspManage
 ```
 
 Output: `GameData/WaterWakes/Plugins/WaterWakes.dll`.
+
+## Foam on Scatterer's waves
+
+With Scatterer 0.09xx (its deferred ocean), the foam trail is painted into Scatterer's ocean gbuffer instead of drawn as
+particles, so Scatterer lights it on the displaced waves. The foam particles are rendered from above into a foam map
+around the camera (on a layer the flight cameras skip); a command buffer in Scatterer's ordered `AfterForwardOpaque`
+list, after its ocean, rebuilds each ocean pixel's position from `oceanGbufferDepth`, samples the map, and points the
+global `oceanGbufferFoam` at a copy holding max(Scatterer's foam, ours). Without it the particles are drawn as before.
+
+The shader is in `Unity/` (Unity 2019.4 project). KSP 1.12 runs 2019.4.18, which can no longer be licensed; build with
+2019.4.40 and then rewrite the bundle's D3D11 programs to the older header (otherwise KSP reports them unsupported):
+
+```
+Unity.exe -batchmode -quit -nographics -projectPath Unity -executeMethod BuildBundles.Build -logFile build.log
+python Unity/fix_bundle.py GameData/WaterWakes/Shaders/waterwakes.shaders   # needs UnityPy
+```
