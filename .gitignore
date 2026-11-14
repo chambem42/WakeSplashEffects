@@ -1,0 +1,6 @@
+Source/bin/
+Source/obj/
+GameData/WaterWakes/Plugins/
+GameData/WaterWakes/PluginData/
+*.user
+.vs/
