@@ -1,0 +1,4 @@
+[submodule "KspTests/KspTest"]
+	path = KspTests/KspTest
+	url = https://github.com/chambem42/KspTest.git
+	branch = main

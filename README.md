@@ -33,3 +33,19 @@ The shader is in `Unity/` (Unity 2019.4 project). KSP 1.12 runs 2019.4.18, which
 Unity.exe -batchmode -quit -nographics -projectPath Unity -executeMethod BuildBundles.Build -logFile build.log
 python Unity/fix_bundle.py GameData/WaterWakes/Shaders/waterwakes.shaders   # needs UnityPy
 ```
+
+## Tests
+
+`KspTests/` holds in-game tests run with [KspTest](https://github.com/chambem42/KspTest) (a submodule:
+`git submodule update --init`). `SplashTests` drops bodies onto still water (a cylinder upright and on its side, a ball,
+a wedge, the Mk1-3 pod at Apollo's size) and surfaces a submarine, recording FAR's water slam and the splash; the crafts
+come from `KspTests/WaterWakes.KspTests.Run/crafts/generator/splash_crafts.py`. FAR's water model makes the slam: until
+a FAR release has it, point `FarGameData` (or `FAR_GAMEDATA`) at a FAR build's `GameData/FerramAerospaceResearch`, and
+`KspDir` (or `KSPDIR`) at a KSP install, in `KspTests/Directory.Build.props.user`. CustomProceduralParts comes from a
+sibling checkout (`CppGameData`).
+
+```
+cd KspTests
+dotnet build WaterWakes.KspTests.Run
+KSPTEST_EXPLICIT=1 KSPTEST_PARAMS="cylinderDrops=8@5" dotnet test WaterWakes.KspTests.Run --no-build --filter "FullyQualifiedName~Splash_CylinderDrops"
+```

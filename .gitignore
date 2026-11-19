@@ -13,3 +13,6 @@ Unity/build.log
 Unity/*.csproj
 Unity/*.sln
 unitybuild.log
+KspTests/**/bin/
+KspTests/**/obj/
+KspTests/Directory.Build.props.user

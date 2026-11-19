@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <!--
+        WaterWakes' in-game tests: [UITest] methods the KspTest harness runs in a KSP session. Loaded by KSP, so net48,
+        built against the install in KspDir (see ../Directory.Build.props). FAR's water model is read by reflection
+        (FarWater), so this builds without FAR. WaterWakes.KspTests.Run runs them with dotnet test.
+    -->
+    <PropertyGroup>
+        <TargetFramework>net48</TargetFramework>
+        <LangVersion>9</LangVersion>
+        <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+        <RootNamespace>WaterWakes.KspTests</RootNamespace>
+        <IsPackable>false</IsPackable>
+        <IsTestProject>false</IsTestProject>
+        <ResolveAssemblyWarnOrErrorOnTargetArchitectureMismatch>None</ResolveAssemblyWarnOrErrorOnTargetArchitectureMismatch>
+    </PropertyGroup>
+
+    <!-- ksptest serve-plugin's fresh name for each build: changed tests run in a Serve session without a restart -->
+    <PropertyGroup Condition="'$(ServePluginName)' != ''">
+        <AssemblyName>$(ServePluginName)</AssemblyName>
+        <OutputPath>bin/serve-plugins/$(ServePluginName)/</OutputPath>
+        <Deterministic>false</Deterministic>
+    </PropertyGroup>
+
+    <Import Project="$(KspTestRoot)/build/KspTest.FromSource.targets" />
+
+</Project>

@@ -1,0 +1,121 @@
+ship = Splash Cylinder
+version = 1.2.0
+description = A plain cylinder for WaterWakes' splash tests: one ProceduralParts Ore tank, 2.5 m across, 4 m long, standing on its end
+type = VAB
+size = 2.5,4,2.5
+PART
+{
+	part = proceduralTankOre_4294811080
+	partName = Part
+	pos = 0,3,0
+	attPos = 0,0,0
+	attPos0 = 0,3,0
+	rot = 0,0,0,1
+	attRot = 0,0,0,1
+	attRot0 = 0,0,0,1
+	mir = 1,1,1
+	symMethod = Mirror
+	autostrutMode = Off
+	istg = 0
+	resPri = 0
+	dstg = 0
+	sidx = -1
+	sqor = -1
+	sepI = 0
+	attm = 0
+	modCost = 0
+	modMass = 0
+	modSize = 0,0,0
+	MODULE
+	{
+		name = ProceduralPart
+		isEnabled = True
+		density = 0
+		forceLegacyTextures = False
+		textureSet = Original
+		capTextureIndex = 0
+		shapeName = Cylinder
+		stagingEnabled = True
+		EVENTS
+		{
+		}
+		ACTIONS
+		{
+		}
+		UPGRADESAPPLIED
+		{
+			upgrade = ProceduralPartsTank1500L
+			upgrade = ProceduralPartsTank2500L
+			upgrade = ProceduralPartsTankAviation
+			upgrade = ProceduralPartsTank20000L
+			upgrade = ProceduralPartsTank37000L
+			upgrade = ProceduralPartsTank45000L
+			upgrade = ProceduralPartsTank85000L
+			upgrade = ProceduralPartsTankMiniaturization
+			upgrade = ProceduralPartsTankUnlimited
+		}
+	}
+	MODULE
+	{
+		name = ProceduralShapeCylinder
+		isEnabled = True
+		diameter = 2.5
+		length = 4
+		stagingEnabled = True
+		EVENTS
+		{
+		}
+		ACTIONS
+		{
+		}
+		UPGRADESAPPLIED
+		{
+		}
+	}
+	MODULE
+	{
+		name = TankContentSwitcher
+		isEnabled = True
+		tankType = Ore
+		stagingEnabled = True
+		EVENTS
+		{
+		}
+		ACTIONS
+		{
+		}
+		UPGRADESAPPLIED
+		{
+		}
+	}
+	MODULE
+	{
+		name = GeometryPartModule
+		isEnabled = True
+		stagingEnabled = True
+		EVENTS
+		{
+		}
+		ACTIONS
+		{
+		}
+		UPGRADESAPPLIED
+		{
+		}
+	}
+	MODULE
+	{
+		name = FARAeroPartModule
+		isEnabled = True
+		stagingEnabled = True
+		EVENTS
+		{
+		}
+		ACTIONS
+		{
+		}
+		UPGRADESAPPLIED
+		{
+		}
+	}
+}

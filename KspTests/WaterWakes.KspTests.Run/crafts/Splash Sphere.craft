@@ -1,0 +1,213 @@
+ship = Splash Sphere
+version = 1.2.0
+description = A 2.5 m ball for WaterWakes' splash tests: one ProceduralParts Ore tank, a Spine of round sections
+type = VAB
+size = 2.5,2.5,2.5
+PART
+{
+	part = proceduralTankOre_4294811080
+	partName = Part
+	pos = 0,2.25,0
+	attPos = 0,0,0
+	attPos0 = 0,2.25,0
+	rot = 0,0,0,1
+	attRot = 0,0,0,1
+	attRot0 = 0,0,0,1
+	mir = 1,1,1
+	symMethod = Mirror
+	autostrutMode = Off
+	istg = 0
+	resPri = 0
+	dstg = 0
+	sidx = -1
+	sqor = -1
+	sepI = 0
+	attm = 0
+	modCost = 0
+	modMass = 0
+	modSize = 0,0,0
+	MODULE
+	{
+		name = ProceduralPart
+		isEnabled = True
+		density = 0
+		forceLegacyTextures = False
+		textureSet = Original
+		capTextureIndex = 0
+		shapeName = Spine
+		stagingEnabled = True
+		EVENTS
+		{
+		}
+		ACTIONS
+		{
+		}
+		UPGRADESAPPLIED
+		{
+			upgrade = ProceduralPartsTank1500L
+			upgrade = ProceduralPartsTank2500L
+			upgrade = ProceduralPartsTankAviation
+			upgrade = ProceduralPartsTank20000L
+			upgrade = ProceduralPartsTank37000L
+			upgrade = ProceduralPartsTank45000L
+			upgrade = ProceduralPartsTank85000L
+			upgrade = ProceduralPartsTankMiniaturization
+			upgrade = ProceduralPartsTankUnlimited
+		}
+	}
+	MODULE
+	{
+		name = ProceduralShapeSpine
+		isEnabled = True
+		length = 2.5
+		hScale = 1
+		vScale = 1
+		stagingEnabled = True
+		SPINE_NODE
+		{
+			position = 0
+			sizeH = 0.0800
+			sizeV = 0.0800
+			section = Ellipse
+		}
+		SPINE_NODE
+		{
+			position = 0.0833333
+			sizeH = 1.3819
+			sizeV = 1.3819
+			section = Ellipse
+		}
+		SPINE_NODE
+		{
+			position = 0.166667
+			sizeH = 1.8634
+			sizeV = 1.8634
+			section = Ellipse
+		}
+		SPINE_NODE
+		{
+			position = 0.25
+			sizeH = 2.1651
+			sizeV = 2.1651
+			section = Ellipse
+		}
+		SPINE_NODE
+		{
+			position = 0.333333
+			sizeH = 2.3570
+			sizeV = 2.3570
+			section = Ellipse
+		}
+		SPINE_NODE
+		{
+			position = 0.416667
+			sizeH = 2.4650
+			sizeV = 2.4650
+			section = Ellipse
+		}
+		SPINE_NODE
+		{
+			position = 0.5
+			sizeH = 2.5000
+			sizeV = 2.5000
+			section = Ellipse
+		}
+		SPINE_NODE
+		{
+			position = 0.583333
+			sizeH = 2.4650
+			sizeV = 2.4650
+			section = Ellipse
+		}
+		SPINE_NODE
+		{
+			position = 0.666667
+			sizeH = 2.3570
+			sizeV = 2.3570
+			section = Ellipse
+		}
+		SPINE_NODE
+		{
+			position = 0.75
+			sizeH = 2.1651
+			sizeV = 2.1651
+			section = Ellipse
+		}
+		SPINE_NODE
+		{
+			position = 0.833333
+			sizeH = 1.8634
+			sizeV = 1.8634
+			section = Ellipse
+		}
+		SPINE_NODE
+		{
+			position = 0.916667
+			sizeH = 1.3819
+			sizeV = 1.3819
+			section = Ellipse
+		}
+		SPINE_NODE
+		{
+			position = 1
+			sizeH = 0.0800
+			sizeV = 0.0800
+			section = Ellipse
+		}
+		EVENTS
+		{
+		}
+		ACTIONS
+		{
+		}
+		UPGRADESAPPLIED
+		{
+		}
+	}
+	MODULE
+	{
+		name = TankContentSwitcher
+		isEnabled = True
+		tankType = Ore
+		stagingEnabled = True
+		EVENTS
+		{
+		}
+		ACTIONS
+		{
+		}
+		UPGRADESAPPLIED
+		{
+		}
+	}
+	MODULE
+	{
+		name = GeometryPartModule
+		isEnabled = True
+		stagingEnabled = True
+		EVENTS
+		{
+		}
+		ACTIONS
+		{
+		}
+		UPGRADESAPPLIED
+		{
+		}
+	}
+	MODULE
+	{
+		name = FARAeroPartModule
+		isEnabled = True
+		stagingEnabled = True
+		EVENTS
+		{
+		}
+		ACTIONS
+		{
+		}
+		UPGRADESAPPLIED
+		{
+		}
+	}
+}
