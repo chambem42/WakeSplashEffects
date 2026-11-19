@@ -41,8 +41,8 @@ python Unity/fix_bundle.py GameData/WaterWakes/Shaders/waterwakes.shaders   # ne
 a wedge, the Mk1-3 pod at Apollo's size) and surfaces a submarine, recording FAR's water slam and the splash; the crafts
 come from `KspTests/WaterWakes.KspTests.Run/crafts/generator/splash_crafts.py`. FAR's water model makes the slam: until
 a FAR release has it, point `FarGameData` (or `FAR_GAMEDATA`) at a FAR build's `GameData/FerramAerospaceResearch`, and
-`KspDir` (or `KSPDIR`) at a KSP install, in `KspTests/Directory.Build.props.user`. CustomProceduralParts comes from a
-sibling checkout (`CppGameData`).
+`KspDir` (or `KSPDIR`) at a KSP install, in `KspTests/Directory.Build.props.user`. CustomProceduralParts is built from
+its repository at a pinned commit (`SplashTests.Mods`).
 
 ```
 cd KspTests

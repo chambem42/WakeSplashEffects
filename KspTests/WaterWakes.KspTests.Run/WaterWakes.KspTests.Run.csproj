@@ -29,10 +29,9 @@
 
     <ItemGroup>
         <!-- FAR (its water model makes the slam; KSPBurst its jobs need) and ProceduralParts from CKAN, with FarGameData's FAR build over CKAN's;
-             CustomProceduralParts (the Spine bodies) and this mod from source; the test parts' patches -->
+             this mod from source; the test parts' patches. (CustomProceduralParts, a repository at a commit: the tests' Mods) -->
         <KspMod Include="FerramAerospaceResearchContinued;KSPBurst;ProceduralParts" />
         <KspOverlay Include="$(FarGameData)" Condition="'$(FarGameData)' != ''" />
-        <KspMod Include="$(CppGameData)" />
         <KspMod Include="..\..\GameData\WaterWakes" />
         <KspMod Include="mods\WaterWakesTests" />
     </ItemGroup>

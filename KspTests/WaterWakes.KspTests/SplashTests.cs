@@ -17,6 +17,13 @@ namespace WaterWakes.KspTests
     /// </summary>
     public static class SplashTests
     {
+        // the tests' mods besides the project's (WaterWakes.KspTests.Run: FAR, ProceduralParts, this mod): CustomProceduralParts
+        // (the Spine bodies) from its repository at a commit, built from source. To test a checkout, put its
+        // GameData/CustomProceduralParts path here (or in KSPTEST_MODS)
+        private const string Mods =
+            "https://github.com/chambem42/CustomProceduralParts@516829fdbbf52b1725ed67ca4122d65d5eda0f32/GameData/CustomProceduralParts" +
+            "?build=Source/CustomProceduralParts.csproj";
+
         private const double OreUnitsPerM3 = 139.664;              // ProceduralParts' Ore tank
 
         // what faces the water from above (m2): the upright cylinder, ball and wedge a 2.5 m disc's; the cylinder on its
@@ -39,23 +46,23 @@ namespace WaterWakes.KspTests
         /// the camera camDistance m (default 20) off, camPitch deg (default 3) down, aimed camAim m (default 4) above the
         /// water where it falls. Recorded, not asserted.
         /// </summary>
-        [UITest(Kind = "Measure", Explicit = true, StartsAt = StartState.Flight, Craft = "Splash Cylinder", CraftDir = "VAB",
+        [UITest(Kind = "Measure", Explicit = true, Mods = Mods, StartsAt = StartState.Flight, Craft = "Splash Cylinder", CraftDir = "VAB",
                 LaunchSite = "LaunchPad", TimeoutSec = 2400)]
         public static IEnumerator Splash_CylinderDrops(TestContext ctx) => Drops(ctx, "Cylinder");
 
         /// <summary>Splash_CylinderDrops' drops of a 2.5 m ball.</summary>
-        [UITest(Kind = "Measure", Explicit = true, StartsAt = StartState.Flight, Craft = "Splash Sphere", CraftDir = "VAB",
+        [UITest(Kind = "Measure", Explicit = true, Mods = Mods, StartsAt = StartState.Flight, Craft = "Splash Sphere", CraftDir = "VAB",
                 LaunchSite = "LaunchPad", TimeoutSec = 2400)]
         public static IEnumerator Splash_SphereDrops(TestContext ctx) => Drops(ctx, "Sphere");
 
         /// <summary>Splash_CylinderDrops' drops of a wedge: a triangular prism (2.5 m sides) lying with an edge down.</summary>
-        [UITest(Kind = "Measure", Explicit = true, StartsAt = StartState.Flight, Craft = "Splash Wedge", CraftDir = "VAB",
+        [UITest(Kind = "Measure", Explicit = true, Mods = Mods, StartsAt = StartState.Flight, Craft = "Splash Wedge", CraftDir = "VAB",
                 LaunchSite = "LaunchPad", TimeoutSec = 2400)]
         public static IEnumerator Splash_WedgeDrops(TestContext ctx) => Drops(ctx, "Wedge");
 
         /// <summary>Splash_CylinderDrops' drops of the same cylinder turned on its side before it falls (sideCylinderTilt
         /// deg off upright, default 90; its axis across the camera's view): 2.5 x 4 m facing the water.</summary>
-        [UITest(Kind = "Measure", Explicit = true, StartsAt = StartState.Flight, Craft = "Splash Cylinder", CraftDir = "VAB",
+        [UITest(Kind = "Measure", Explicit = true, Mods = Mods, StartsAt = StartState.Flight, Craft = "Splash Cylinder", CraftDir = "VAB",
                 LaunchSite = "LaunchPad", TimeoutSec = 2400)]
         public static IEnumerator Splash_SideCylinderDrops(TestContext ctx) => Drops(ctx, "SideCylinder");
 
@@ -69,7 +76,7 @@ namespace WaterWakes.KspTests
         /// low: its centre of mass capsuleCoM m above the heat shield's lowest point (default 0.5; an even fill floated it
         /// apex down, Apollo's "stable 2").
         /// </summary>
-        [UITest(Kind = "Measure", Explicit = true, StartsAt = StartState.Flight, Craft = "Splash Apollo Pod", CraftDir = "VAB",
+        [UITest(Kind = "Measure", Explicit = true, Mods = Mods, StartsAt = StartState.Flight, Craft = "Splash Apollo Pod", CraftDir = "VAB",
                 LaunchSite = "LaunchPad", TimeoutSec = 2400)]
         public static IEnumerator Splash_ApolloPodDrops(TestContext ctx) => Drops(ctx, "Capsule");
 
@@ -330,7 +337,7 @@ namespace WaterWakes.KspTests
         /// for the SPH reference runs to move a body along (sph/). record=true: frames/ as the drops' (impacts.txt: the
         /// frame it is let go). Recorded, not asserted.
         /// </summary>
-        [UITest(Kind = "Measure", Explicit = true, StartsAt = StartState.Flight, Craft = "Splash Submarine", CraftDir = "VAB",
+        [UITest(Kind = "Measure", Explicit = true, Mods = Mods, StartsAt = StartState.Flight, Craft = "Splash Submarine", CraftDir = "VAB",
                 LaunchSite = "LaunchPad", TimeoutSec = 2400)]
         public static IEnumerator Splash_SubmarineSurfacing(TestContext ctx)
         {

@@ -10,7 +10,5 @@
     <!-- a FAR build with its water model (GameData/FerramAerospaceResearch laid out), laid over CKAN's FAR: FarGameData,
          else the environment's. Until a FAR release has the water model, the splash tests need one -->
     <FarGameData Condition="'$(FarGameData)' == ''">$(FAR_GAMEDATA)</FarGameData>
-    <!-- CustomProceduralParts (the Spine bodies): a checkout's GameData/CustomProceduralParts, else a sibling's -->
-    <CppGameData Condition="'$(CppGameData)' == ''">$(MSBuildThisFileDirectory)../../CustomProceduralParts/GameData/CustomProceduralParts</CppGameData>
   </PropertyGroup>
 </Project>
