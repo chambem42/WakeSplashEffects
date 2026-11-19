@@ -72,8 +72,11 @@ namespace WaterWakes
             Slider("Intensity", ref s.intensity, 0, 3, "x");
             Slider("Brightness", ref s.brightness, 0, 2, "x");
             Slider("Fade as hull lifts", ref s.loadExponent, 0, 4, "", "0: no fade; higher: weaker on the step");
+            Slider("Planing strength", ref s.planing, 0, 1, "", "the least strength while the hull planes on the water");
+            Slider("Planing drag ref", ref s.planingArea, 0.05f, 1, "x", "wet share of the waterplane at rest x (V / full foam speed)^2 for full planing strength");
             Slider("Min speed", ref s.minSpeed, 0, 5, "m/s");
             Slider("Full foam at", ref s.fullSpeed, 1, 30, "m/s");
+            Slider("Fade under water", ref s.submergedFade, 0.01f, 3, "m", "a part wholly under water: no wake once its top is this deep");
 
             Header("Foam");
             Slider("Opacity", ref s.foamAlpha, 0, 1);
@@ -98,14 +101,47 @@ namespace WaterWakes
             Slider("Lifetime", ref s.mistLife, 0.5f, 8, "s");
             Slider("Rise speed", ref s.mistRise, 0, 3, "m/s");
 
+            Header("Splashes");
+            Slider("Min impact speed", ref s.splashMinSpeed, 0.2f, 5, "m/s", "how fast a part must hit the water, across its length");
+            Slider("Rate", ref s.splashRate, 0, 1000);
+            Slider("Throw height", ref s.splashHeight, 0, 3, "x");
+            Slider("Breach plume", ref s.breachSize, 0, 3, "x", "a hull breaking out from under the water");
+            Slider("Crown speed", ref s.splashSheetSpeed, 0, 1.5f, "x", "the crown sheet's launch speed, a fraction of the speed into the water");
+            Slider("Jet height", ref s.jetHeight, 0, 3, "x", "the column of water thrown up where the cavity behind a deep entry closes");
+            Slider("Spray skirt", ref s.skirtAmount, 0, 3, "x", "the flat sheet a blunt bottom (a heat shield) throws out as it hits");
+            Slider("Skirt speed", ref s.skirtSpeed, 0, 3, "x");
+            Slider("Surface rings", ref s.ringWaves, 0, 3, "x", "the ring of ripples an entry sends out (whitecapped while it runs fast); 0: none");
+            Slider("Ring whitecap speed", ref s.ringWhitecapSpeed, 0, 10, "m/s", "the crest whitecaps from this speed, fully 3 m/s faster");
+            Slider("Ripple lifetime", ref s.ringLife, 1, 8, "x", "the ripples last this many times as long as the breaking crest");
+            Slider("Ripple wavelength", ref s.ringWavelength, 0.2f, 4, "x");
+            s.hideStockSplash = GUILayout.Toggle(s.hideStockSplash, " Hide stock's splash column (keeps its sound)");
+
             Header("Foam on the waves (Scatterer 0.09+)");
             s.paintFoam = GUILayout.Toggle(s.paintFoam, " Paint the foam into Scatterer's ocean");
+            s.crispSpray = GUILayout.Toggle(s.crispSpray, " Crisp splashes (sharp-edged, sun-lit sheets and foam)");
+            s.fixOceanAmbient = GUILayout.Toggle(s.fixOceanAmbient, " Light the water by Scatterer's sky (fixes a near-black sea seen from above)");
             Slider("Strength", ref s.paintStrength, 0, 2, "x");
             Slider("Area around camera", ref s.paintMapSize, 50, 1000, "m");
+            s.waves = GUILayout.Toggle(s.waves, " Wake waves (Kelvin pattern) on the ocean");
+            s.waveSim = GUILayout.Toggle(s.waveSim, " Simulate the waves (wakes and rings in one height field; off: the analytic patterns)");
+            Slider("Sim area", ref s.simSize, 40, 400, "m");
+            Slider("Sim push", ref s.simStrength, 0, 3, "x", "how hard the hulls' displacement drives the waves");
+            Slider("Sim damping", ref s.simDamping, 0, 0.5f, "/s");
+            Slider("Whitecap slope", ref s.simFoamSlope, 0.05f, 1, "", "a simulated crest breaks past this slope");
+            Slider("Whitecap life", ref s.simFoamLife, 0.2f, 10, "s");
+            Slider("Analytic wake above", ref s.simKelvinAbove, 0, 40, "m/s", "craft faster than this keep the analytic Kelvin waves (longer than the sim's area)");
+            Slider("Short-wave damping", ref s.simShortDamping, 0, 0.3f, "m2/s", "damps short ripples much more than long waves (x wavenumber squared)");
+            Slider("Displace the ocean", ref s.simDisplace, 0, 3, "x", "the sim's waves moving Scatterer's ocean surface itself (needs Harmony); 0: drawn as shading only");
+            s.simDebugTint = GUILayout.Toggle(s.simDebugTint, " Debug: tint the sea by the sim's height");
+            s.simDebugInset = GUILayout.Toggle(s.simDebugInset, " Debug: show the sim's area in a corner");
+            Slider("Wave height", ref s.waveHeight, 0, 4, "x");
+            Slider("Steepest slope", ref s.waveMaxSlope, 0.01f, 0.8f);
+            Slider("Wakes displace the ocean", ref s.kelvinDisplace, 0, 3, "x", "the wakes' waves moving Scatterer's ocean surface itself (needs Harmony); 0: drawn as shading only");
+            Slider("Wake length", ref s.waveTrail, 50, 5000, "m");
 
             Header("Window");
             s.hideWithUI = GUILayout.Toggle(s.hideWithUI, " Hide with the UI (F2)");
-            s.debugLog = GUILayout.Toggle(s.debugLog, " Log hull detection (KSP.log, every 5 s)");
+            s.debugLog = GUILayout.Toggle(s.debugLog, " Log hull detection (KSP.log, every 1 s)");
             GUILayout.EndScrollView();
 
             GUILayout.BeginHorizontal();

@@ -16,7 +16,7 @@ public static class BuildBundles
         var build = new AssetBundleBuild
         {
             assetBundleName = "waterwakes.shaders",
-            assetNames = new[] { "Assets/Shaders/OceanFoam.shader", "Assets/Shaders/Test.shader" },
+            assetNames = new[] { "Assets/Shaders/OceanFoam.shader", "Assets/Shaders/Test.shader", "Assets/Shaders/FoamMap.shader", "Assets/Shaders/Foam.shader", "Assets/Shaders/Spray.shader", "Assets/Shaders/WaveSim.shader" },
         };
         AssetBundleManifest m = BuildPipeline.BuildAssetBundles(outDir, new[] { build }, BuildAssetBundleOptions.ChunkBasedCompression,
                                                                 BuildTarget.StandaloneWindows64);

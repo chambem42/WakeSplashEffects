@@ -12,3 +12,4 @@ Unity/obj/
 Unity/build.log
 Unity/*.csproj
 Unity/*.sln
+unitybuild.log
