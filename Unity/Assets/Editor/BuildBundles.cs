@@ -12,11 +12,12 @@ public static class BuildBundles
         string outDir = Path.GetFullPath(Path.Combine(Application.dataPath, "..", "..", "GameData", "WaterWakes", "Shaders"));
         Directory.CreateDirectory(outDir);
         PlayerSettings.SetUseDefaultGraphicsAPIs(BuildTarget.StandaloneWindows64, false);
-        PlayerSettings.SetGraphicsAPIs(BuildTarget.StandaloneWindows64, new[] { GraphicsDeviceType.Direct3D11 });
+        // OpenGL core for Linux (and Windows run with -force-glcore): the one bundle serves both
+        PlayerSettings.SetGraphicsAPIs(BuildTarget.StandaloneWindows64, new[] { GraphicsDeviceType.Direct3D11, GraphicsDeviceType.OpenGLCore });
         var build = new AssetBundleBuild
         {
             assetBundleName = "waterwakes.shaders",
-            assetNames = new[] { "Assets/Shaders/OceanFoam.shader", "Assets/Shaders/Test.shader", "Assets/Shaders/FoamMap.shader", "Assets/Shaders/Foam.shader", "Assets/Shaders/Spray.shader", "Assets/Shaders/WaveSim.shader" },
+            assetNames = new[] { "Assets/Shaders/OceanFoam.shader", "Assets/Shaders/Test.shader", "Assets/Shaders/FoamMap.shader", "Assets/Shaders/Foam.shader", "Assets/Shaders/Spray.shader", "Assets/Shaders/WaveSim.shader", "Assets/Shaders/SoftParticle.shader" },
         };
         AssetBundleManifest m = BuildPipeline.BuildAssetBundles(outDir, new[] { build }, BuildAssetBundleOptions.ChunkBasedCompression,
                                                                 BuildTarget.StandaloneWindows64);

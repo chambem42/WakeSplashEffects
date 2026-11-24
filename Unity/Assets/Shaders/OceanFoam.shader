@@ -17,6 +17,7 @@ Shader "WaterWakes/OceanFoam"
     sampler2D oceanGbufferNormalsAndSigma;
     sampler2D _WakeFoamMap;
     sampler2D _WakeNearMap;     // the finer map where the camera looks
+    float _WakeNearChurn;       // 1: it has the whitewater channel (b)
     float4x4 _WakeNearMatrix;   // world -> near map uv (xy)
     float _WakeNearOn;
     float4x4 _WakeInvProj;      // inverse of the camera's GPU projection (render into texture)
@@ -293,6 +294,141 @@ Shader "WaterWakes/OceanFoam"
         return (VNoise(a) * 2 + VNoise(b)) / 3;
     }
 
+    // the scene's light (OceanFoamPainter.SetLight) and our foam's look
+    float3 _WWSunColor, _WWSunDir, _WWAmbient, _WWCamPos;
+    float _WWFoamShade, _WWFoamCover, _WWFoamContrast, _WWLace, _WWLaceSize, _WWBubbles;
+
+    // our foam maps at p: r the foam on the surface, g the bubbles under it (the far map; the near one where it covers),
+    // b the part of r that is a splash's whitewater (the near map only)
+    float3 MapFoam(float3 p)
+    {
+        float2 m = mul(_WakeMapMatrix, float4(p, 1)).xy;
+        float3 f = 0;
+        if (all(m >= 0) && all(m <= 1))
+            f.rg = tex2D(_WakeFoamMap, m).rg * (1 - smoothstep(0.6, 0.98, length(m - 0.5) * 2));   // (round and soft: no line where it ends)
+        if (_WakeNearOn > 0.5)
+        {
+            float2 n = mul(_WakeNearMatrix, float4(p, 1)).xy;
+            if (all(n >= 0) && all(n <= 1))
+                f = lerp(f, tex2D(_WakeNearMap, n).rgb * float3(1, 1, _WakeNearChurn), 1 - smoothstep(0.75, 0.97, max(abs(n.x - 0.5), abs(n.y - 0.5)) * 2));
+        }
+        return f;
+    }
+
+    // where the view ray through uv meets the still sea's plane (far off, above the horizon)
+    float3 FlatHit(float2 uv)
+    {
+        float3 d = mul((float3x3)_WakeCamToWorld, Ray(uv, _WakeFlipY));
+        float dn = dot(d, _WakeUp);
+        float t = dn < -1e-4 ? dot(_WakeSurf - _WWCamPos, _WakeUp) / dn : 1e6;
+        return _WWCamPos + d * min(t, 1e6);
+    }
+
+    // a pixel's size on the still sea (m; texel: the target's 1 / size)
+    float Footprint(float2 uv, float2 texel)
+    {
+        float3 h0 = FlatHit(uv);
+        return max(length(FlatHit(uv + float2(texel.x, 0)) - h0), length(FlatHit(uv + float2(0, texel.y)) - h0));
+    }
+
+    // the sea's own plane (KSP's up is seldom world y): p's coordinates on it (m)
+    float2 SeaPlane(float3 p)
+    {
+        float3 e1 = normalize(cross(_WakeUp, abs(_WakeUp.y) < 0.9 ? float3(0, 1, 0) : float3(1, 0, 0))), e2 = cross(_WakeUp, e1);
+        return float2(dot(p, e1), dot(p, e2));
+    }
+
+    // the foam lace texture (FoamLace.cs: tiling, 1024 square; r tufts, g a second field, b strands, each uniform 0..1)
+    // at q (m) tiled every tile m, its mip from the pixel's size on the water (explicit: no gradients in branches)
+    sampler2D _WWLaceTex;
+    float4 LaceTap(float2 q, float tile, float fw)
+    {
+        return tex2Dlod(_WWLaceTex, float4(q / tile, 0, log2(max(fw * 1024 / tile, 1))));
+    }
+
+    // the foam on the surface, r from the maps, as churned foam lies on water: tufts of it with soft, wispy edges, from
+    // warped fractal noise (the texture, at two scales, ~6 m and 1.7 m tiles, turned against each other, wandering
+    // slowly), r setting how much of it is foam (the field's threshold: dense, nearly all, brightest well inside its
+    // tufts; thinning, the tufts shrink apart, rounded holes of clear water opening between them; thin, a few tufts and
+    // threads). Faded to plain r where a pixel is too large for the tufts (far off). fw: the pixel's size on the water (m)
+    float SurfaceFoam(float r, float3 p, float fw)
+    {
+        if (_WWLace <= 0 || r <= 0.002)
+            return r;
+        float T1 = 6 * _WWLaceSize, T2 = 1.7 * _WWLaceSize;
+        float v = smoothstep(0.15 * T1, 0.04 * T1, fw);
+        if (v <= 0)
+            return r;
+        float2 q = SeaPlane(p);
+        float t = _Time.y * 0.03;
+        float2 w = (float2(VNoise(q / (2 * T1) + t), VNoise(q / (2 * T1) + 7.1 - t)) - 0.5) * 0.8;
+        float2 q2 = float2(0.8 * q.x - 0.6 * q.y, 0.6 * q.x + 0.8 * q.y) + 13.7;
+        // (thinning foam blurs: its texture from coarser mips, its edge's ramp wider)
+        float blur = 1 - smoothstep(0.15, 0.7, r);
+        float fb = max(fw, 0.05 * blur);
+        float4 a = LaceTap(q + w, T1, fb), b = LaceTap(q2 - 0.6 * w, T2, fb);
+        // (and a much larger, slower scale (~23 m tiles, turned again), so it thins unevenly, in broad patches: thin foam's
+        // surviving tufts had been the two scales' peaks alone, alike and evenly spaced)
+        float2 q3 = float2(0.28 * q.x + 0.96 * q.y, -0.96 * q.x + 0.28 * q.y) - 31.9;
+        float big = LaceTap(q3 + 3 * w, 23 * _WWLaceSize, fw).g;
+        // the field: the large tufts roughened by the finer ones (re-spread toward 0..1)
+        float F = saturate((0.7 * a.r + 0.3 * b.g - 0.5) * 1.6 + 0.5);
+        // (its edge soft and wispy: the threshold frayed by the fine strands, over a wide ramp; inside, brighter the
+        // deeper in, streaked by them)
+        // (how much of it is foam: never under ~10% while there is any, the rest of the thinning by its opacity (fade),
+        // so tufts fade out rather than shrink to their peaks and vanish at once)
+        float cover = saturate(r * 1.25 + 0.1);
+        float th = 1 - cover + 0.22 * (b.b - 0.5) + 0.35 * (big - 0.5);
+        float fade = smoothstep(0, 0.45, r);
+        float tufts = smoothstep(th - 0.16 - 0.14 * blur, th + 0.12 + 0.1 * blur, F) * fade;
+        float dens = lerp(0.5, 1, saturate((F - th) / 0.35)) * lerp(0.7, 1, b.b) * lerp(0.85, 1, b.r);
+        // threads round the thinning foam (the ridged strands, broken up)
+        float threads = smoothstep(0.72, 0.95, a.b) * lerp(0.3, 1, b.g) * 0.6 * fade * (1 - tufts);
+        float s = saturate(max(tufts * dens, threads));
+        return lerp(r, s, v * saturate(_WWLace));
+    }
+
+    // a splash's whitewater, r of it: churned white water, dense and bright where the lace is tufts and holes, torn
+    // into ropes and small gaps by the same noise at finer scales (~2.4 m and 0.8 m tiles), streaming slowly; thinning,
+    // it breaks into streaks and patches rather than fading evenly
+    float Whitewater(float r, float3 p, float fw)
+    {
+        if (r <= 0.002)
+            return 0;
+        float2 q = SeaPlane(p);
+        float t = _Time.y * 0.05;
+        float2 w = (float2(VNoise(q / 3 + t), VNoise(q / 3 + 5.3 - t)) - 0.5) * 0.9;
+        float2 q2 = float2(0.6 * q.x + 0.8 * q.y, -0.8 * q.x + 0.6 * q.y) + 4.1;
+        float4 a = LaceTap(q + w, 2.4, fw), b = LaceTap(q2 - 0.7 * w, 0.8, fw);
+        float F = saturate((0.6 * a.r + 0.4 * b.g - 0.5) * 1.5 + 0.5);
+        // (open water showing through it in patches a few m across (a third, larger scale), the aerated water's
+        // turquoise in them; its white uneven, brightest in its ropes)
+        float2 q3 = float2(0.28 * q.x + 0.96 * q.y, -0.96 * q.x + 0.28 * q.y) - 17.3;
+        float big = LaceTap(q3 + 2 * w, 9, fw).g;
+        float cover = saturate(r * 1.35 + 0.08);
+        float th = 1 - cover + 0.45 * (a.b - 0.5) + 0.4 * (big - 0.5);
+        float body = smoothstep(th - 0.2, th + 0.14, F);
+        float ropes = smoothstep(0.55, 0.9, b.b) * 0.55 * (1 - body) * smoothstep(0.05, 0.4, r);
+        float s = max(body * lerp(0.5, 1, saturate((F - th) / 0.3)) * lerp(0.7, 1, b.r), ropes) * smoothstep(0, 0.3, r);
+        // (far off, a pixel wider than its texture: plain)
+        return lerp(saturate(r * 1.3), s, smoothstep(0.5, 0.12, fw));
+    }
+
+    // the light the bubbles under the surface (b, 0..1) send back up through it: sun and sky scattered in the bubble cloud,
+    // turquoise through the water above it, less where the surface reflects more (n its normal, v toward the camera);
+    // patchy (the cloud thicker and thinner a few m across). Exposed as the forward foam is (1 - exp(-light x 2.4)):
+    // Scatterer's tone map's range
+    float3 BubbleLight(float b, float3 p, float3 n, float3 v)
+    {
+        float m = 1 - saturate(dot(n, v));
+        float F = 0.02 + 0.98 * m * m * m * m * m;
+        float mu = saturate(dot(_WakeUp, _WWSunDir));
+        float3 e = _WWSunColor * (0.25 + 0.75 * mu) + _WWAmbient * 0.6;
+        float2 q = SeaPlane(p);
+        float patchy = lerp(0.35, 1.25, Patchy(q / 2.5 + 9.7) * 0.7 + VNoise(q / 0.8) * 0.3);
+        return float3(0.3, 0.68, 0.78) * (1 - exp(-e * 2.4)) * (1 - F) * saturate(b * patchy) * 0.6 * _WWBubbles;
+    }
+
     // where p is on source k's wake: x along its track behind the bow, y off it (+ to the source's + side); fwd / side: the
     // track's heading and + side there (world, level); kap: its curvature. The track is a polyline (the bow now, then where
     // it was) with a tangent at each point (its two segments' mean); p goes to the point of a segment whose tangent,
@@ -427,6 +563,8 @@ Shader "WaterWakes/OceanFoam"
                 float theirs = tex2D(oceanGbufferFoam, i.uv).r;
                 if (_WakeDebugHalf > 0.5 && _WakeDebugHalf < 1.5)
                     return i.uv.x < 0.5 ? 1 : theirs;
+                if (_WakeDebugHalf > 4.5 && i.uv.x < 0.5)       // (diagnostic) a coverage ramp, 0 to 1 up the left half
+                    return IsOcean(tex2D(oceanGbufferDepth, i.uv).r) > 0.5 ? i.uv.y : theirs;
                 if (_WakeDebugHalf > 2.5)       // (diagnostic) Scatterer's foam alone
                     return theirs;
                 if (_WakeDebugHalf > 1.5)       // (diagnostic) ours alone
@@ -437,24 +575,9 @@ Shader "WaterWakes/OceanFoam"
                 if (IsOcean(raw) < 0.5)
                     return theirs;
                 float3 p = WorldFromDevice(i.uv, raw, _WakeFlipY);
-                float2 m = mul(_WakeMapMatrix, float4(p, 1)).xy;
-                float ours = 0;
-                if (all(m >= 0) && all(m <= 1))
-                {
-                    // fade out at the map's edge
-                    float edge = 1 - smoothstep(0.6, 0.98, length(m - 0.5) * 2);   // (round and soft: no line where it ends)
-                    ours = tex2D(_WakeFoamMap, m).r * edge;
-                }
-                // the near map where it covers, the far one taking over towards its edge
-                if (_WakeNearOn > 0.5)
-                {
-                    float2 n = mul(_WakeNearMatrix, float4(p, 1)).xy;
-                    if (all(n >= 0) && all(n <= 1))
-                    {
-                        float w = 1 - smoothstep(0.75, 0.97, max(abs(n.x - 0.5), abs(n.y - 0.5)) * 2);
-                        ours = lerp(ours, tex2D(_WakeNearMap, n).r, w);
-                    }
-                }
+                float3 mapped = MapFoam(p);
+                float ours = mapped.r;
+                float churn = saturate(mapped.b / max(mapped.r, 0.01));
                 // the rings' whitecaps along their leading crests (Scatterer's normal here: its own small waves)
                 float4 senc = tex2D(oceanGbufferNormalsAndSigma, i.uv);
                 float3 sn = float3(senc.xy * 2 - 1, 0);
@@ -466,7 +589,32 @@ Shader "WaterWakes/OceanFoam"
                 for (int k = 0; k < RP_MAX; k++)
                     if (k < (int)_RpCount)
                         ours = max(ours, RippleFoam(k, p, sn));
-                return max(theirs, saturate(ours * _WakeStrength));
+                // ours shaded by the waves: Scatterer lights foam as coverage x (sun x N.L + sky + ambient), the sky and
+                // ambient most of it, and a light breeze's slopes (~0.05) move N.L a few per cent, so it looked flat on
+                // them. Its coverage here is our only say: scaled by the sun on its normal (slopes x _WWFoamShade) over
+                // the sun on the flat sea (facets away from the sun thinner, so darker; toward it brighter). Dense foam
+                // first eased to _WWFoamCover at most: its tone map whitens coverage ~0.5 to 195 / 255, 1 to 240 (a ramp,
+                // measured), and ours at 1 or more had sat flat white there, the shading and the sea's glints under it lost
+                // (laid as lace first: SurfaceFoam)
+                // (a splash's whitewater its own way, and whiter than the wake's foam is let go)
+                float fw = Footprint(i.uv, 1 / _ScreenParams.xy);
+                ours = saturate(ours * _WakeStrength);
+                float lace = SurfaceFoam(ours, p, fw);
+                if (churn > 0.01)
+                    ours = lerp(lace, Whitewater(ours, p, fw), churn);
+                else
+                    ours = lace;
+                float coverMax = lerp(_WWFoamCover, max(_WWFoamCover, 0.85), churn);
+                float3 nE = normalize(lerp(_WakeUp, sn, _WWFoamShade));
+                float lam = saturate(dot(nE, _WWSunDir) * 0.85 + 0.15), lam0 = saturate(dot(_WakeUp, _WWSunDir) * 0.85 + 0.15);
+                float lit = clamp(lam / max(lam0, 0.05), 0.25, 1.6);
+                float cover = saturate(coverMax * (1 - exp(-3 * ours)) / (1 - exp(-3)) * lit);
+                // (_WWFoamContrast: its tone map undone (white ~ 1 - exp(-2.9 coverage), the ramp above), the foam as
+                // white as it is dense and lit, up to _WWFoamCover's white: thin foam and soft edges stay thin and soft, the
+                // tufts' texture and the waves' shading show inside dense foam (eased twice, all but the thinnest sat at one
+                // flat grey with a hard edge))
+                float white = (1 - exp(-2.9 * coverMax)) * ours * lit;
+                return max(theirs, lerp(cover, -log(1 - min(white, 0.98)) / 2.9, _WWFoamContrast));
             }
             ENDCG
         }
@@ -615,6 +763,189 @@ Shader "WaterWakes/OceanFoam"
                     }
                 v.xyz += _WakeUp * h * _KwDisplace;
                 return v;
+            }
+            ENDCG
+        }
+
+        // 6: Scatterer's forward ocean (0.0878: ForwardOceanHook, recorded into its own command buffer straight after its
+        //    ocean pass, before its scattering): over the camera target where the ocean was just drawn (its depth, in
+        //    ScattererDepthCopy, changed from the scene's before it), out = rgb + target x a (Blend One SrcAlpha): the wake
+        //    waves as the change their slopes make to the sky's reflection (x a) and the sun's glints (+ rgb), and our foam
+        //    laid over them, lit by the scene's sun and ambient (Scatterer tints both for its atmosphere)
+        Pass
+        {
+            Blend One SrcAlpha
+            ColorMask RGB
+            CGPROGRAM
+            #pragma vertex vert
+            #pragma fragment frag
+            #pragma target 3.0
+            sampler2D_float _WWPreOceanDepth;
+            sampler2D_float _WWOceanDepth;
+            float4 _WWOceanTexel;     // (1/w, 1/h) of it: set with it
+            float _WWFwdOn, _WWFoamBright, _WWWaveShade, _WWGlint;
+            // Scatterer's own waves (OceanFoamPainter.CopyOceanWaves: from its ocean node): FFT slopes (maps 1, 2)
+            // and horizontal displacements (3, 4) for its four grids, and its ocean frame (axes in world; origin at sea level
+            // beneath the camera, z up there)
+            sampler2D _WWOMap1, _WWOMap2, _WWOMap3, _WWOMap4;
+            float3 _WWOX, _WWOY, _WWOZ, _WWOOrigin;
+            float4 _WWOGrid, _WWOChop, _WWOCamPos;
+            float _WWORadius, _WWFftOn, _WWFoamSheen;
+
+            // the sea's own normal at p, per pixel, as Scatterer lights it with (its slopes at the grid point displaced
+            // to p: one step back along its choppy displacement)
+            float3 FftNormal(float3 p)
+            {
+                float3 d = p - _WWOOrigin, op = float3(dot(_WWOX, d), dot(_WWOY, d), dot(_WWOZ, d));
+                float2 u = _WWOCamPos.xy + op.xy;
+                float4 g = 1 / _WWOGrid;
+                u -= _WWOChop.x * tex2D(_WWOMap3, u * g.x).xy + _WWOChop.y * tex2D(_WWOMap3, u * g.y).zw
+                   + _WWOChop.z * tex2D(_WWOMap4, u * g.z).xy + _WWOChop.w * tex2D(_WWOMap4, u * g.w).zw;
+                float2 s = tex2D(_WWOMap1, u * g.x).xy + tex2D(_WWOMap1, u * g.y).zw
+                         + tex2D(_WWOMap2, u * g.z).xy + tex2D(_WWOMap2, u * g.w).zw;
+                s -= op.xy / (_WWORadius + op.z);      // (the sphere's curve away from the camera's up)
+                return normalize(_WWOZ - s.x * _WWOX - s.y * _WWOY);
+            }
+
+            float Fresnel(float c) { float m = 1 - saturate(c); return 0.02 + 0.98 * m * m * m * m * m; }
+            // the sky's brightness reflected at elevation sine e (brighter toward the horizon, as a clear sky is)
+            float Sky(float e) { return lerp(1.7, 0.75, sqrt(saturate(e))); }
+            // the sun's glitter: a Beckmann lobe on the small waves' slopes (sigma2: their slope variance)
+            float Glint(float3 n, float3 v, float3 l, float sigma2)
+            {
+                float3 h = normalize(v + l);
+                float c = saturate(dot(n, h)), c2 = c * c;
+                float t2 = (1 - c2) / max(c2, 1e-4);
+                return exp(-t2 / sigma2) / (3.14159 * sigma2 * c2 * c2 + 1e-4) * Fresnel(dot(v, h)) * saturate(dot(n, l)) / max(4 * saturate(dot(n, v)) + 0.05, 0.05);
+            }
+
+            float4 frag(v2f i) : SV_Target
+            {
+                if (_WWFwdOn < 0.5)
+                    return float4(0, 0, 0, 1);
+                if (_WakeDebugHalf > 0.5 && _WakeDebugHalf < 1.5 && i.uv.x < 0.5)
+                    return float4(1, 0, 1, 0.5);       // (hook test: the left half tinted)
+                float raw = tex2D(_WWOceanDepth, i.uv).r, pre = tex2D(_WWPreOceanDepth, i.uv).r;
+                float ocean = abs(raw - pre) > 1e-9 ? 1 : 0;
+                if (_WakeDebugHalf < -0.5)            // (mask test: the ocean's pixels tinted)
+                    return ocean > 0.5 ? float4(0, 0.4, 0, 0.6) : float4(0, 0, 0, 1);
+                float3 p = WorldFromDevice(i.uv, raw, _WakeFlipY);
+                // a pixel's step on the water, on the still sea's plane (smooth: the ocean mesh's own, from its depth,
+                // is flat over each of its screen grid's triangles and jumps between rows, and the waves' fade with it
+                // drew bands along them)
+                float3 h0 = FlatHit(i.uv), dpx = FlatHit(i.uv + float2(_WWOceanTexel.x, 0)) - h0, dpy = FlatHit(i.uv + float2(0, _WWOceanTexel.y)) - h0;
+                float3 grad = 0;
+                [unroll]
+                for (int k = 0; k < KW_MAX; k++)
+                    if (k < (int)_KwCount)
+                    {
+                        float x, y, kap, hk;
+                        float3 fwd, side;
+                        TrackFrame(k, p, x, y, fwd, side, kap);
+                        grad += KelvinGrad(k, x, y, fwd, side, kap, dpx, dpy, hk);
+                    }
+                [unroll]
+                for (int j = 0; j < RP_MAX; j++)
+                    if (j < (int)_RpCount)
+                        grad += RippleGrad(j, p, dpx, dpy);
+                if (_SimOn > 0.5)
+                    grad += SimGrad(p);
+                if (ocean < 0.5)
+                    return float4(0, 0, 0, 1);
+
+                float3 up = _WakeUp;
+                float3 v = normalize(_WWCamPos - p);
+                float3 n1 = normalize(up - grad);
+                // the waves' own surface here, from the ocean's depth 6 px either way: across several of its screen grid's
+                // cells (nearer, the flat triangles drew bands along its rows); central, unless one side jumps (an edge:
+                // then the nearer side alone). Its tilt kept to the sea's (a step at a silhouette is no slope), and
+                // softened: the grid's waves are smoother than the sea's own fine ones
+                float2 ts = _WWOceanTexel.xy * 6;
+                float3 ax = WorldFromDevice(i.uv + float2(ts.x, 0), tex2D(_WWOceanDepth, i.uv + float2(ts.x, 0)).r, _WakeFlipY) - p;
+                float3 bx = p - WorldFromDevice(i.uv - float2(ts.x, 0), tex2D(_WWOceanDepth, i.uv - float2(ts.x, 0)).r, _WakeFlipY);
+                float3 ay = WorldFromDevice(i.uv + float2(0, ts.y), tex2D(_WWOceanDepth, i.uv + float2(0, ts.y)).r, _WakeFlipY) - p;
+                float3 by = p - WorldFromDevice(i.uv - float2(0, ts.y), tex2D(_WWOceanDepth, i.uv - float2(0, ts.y)).r, _WakeFlipY);
+                float lax = dot(ax, ax), lbx = dot(bx, bx), lay = dot(ay, ay), lby = dot(by, by);
+                float3 ex = max(lax, lbx) < 4 * min(lax, lbx) ? ax + bx : (lax < lbx ? ax : bx);
+                float3 ey = max(lay, lby) < 4 * min(lay, lby) ? ay + by : (lay < lby ? ay : by);
+                float3 ng = normalize(cross(ex, ey));
+                ng *= dot(ng, up) < 0 ? -1 : 1;
+                float3 tilt = ng - up * dot(ng, up);
+                float tl = length(tilt);
+                ng = normalize(up + 0.7 * tilt / max(dot(ng, up), 0.2) * (tl > 0.6 ? 0.6 / tl : 1));
+                float3 nf = normalize(ng - grad);
+                // the reflection: the sky's light (Fresnel x brightness at the reflected ray's elevation) and the sea's
+                // own (upwelling, ~a fifth of it), with the waves' normal over the flat one: their ratio scales the pixel
+                float3 r0 = reflect(-v, up), r1 = reflect(-v, n1);
+                float f0 = Fresnel(dot(v, up)), f1 = Fresnel(dot(v, n1));
+                // ... and the sun's glitter in the same ratio: the waves' slopes shift where the sea's own glints fall
+                // (the V of glitter behind a ship), rather than adding light of their own
+                float sea = 0.15, gl = 20 * _WWGlint;   // (in the sky's reflected light: upwelling ~0.15; the sun ~20 x the BRDF)
+                float base = f0 * Sky(dot(r0, up)) + (1 - f0) * sea + gl * Glint(up, v, _WWSunDir, 0.04);
+                float wav = f1 * Sky(dot(r1, up)) + (1 - f1) * sea + gl * Glint(n1, v, _WWSunDir, 0.04);
+                float scale = clamp(lerp(1, wav / max(base, 1e-3), _WWWaveShade), 0.3, 3);
+                float3 add = 0;
+
+                // our foam (the maps as pass 0's; the rings' and the sim's whitecaps)
+                float2 mf = MapFoam(p).rg;
+                float f = mf.r;
+                if (_SimOn > 0.5)
+                    f = max(f, SimWhitecap(p, ng));
+                [unroll]
+                for (int q = 0; q < RP_MAX; q++)
+                    if (q < (int)_RpCount)
+                        f = max(f, RippleFoam(q, p, ng));
+                // (laid as lace: SurfaceFoam; the pixel's size on the water from the steps above)
+                f = SurfaceFoam(saturate(f * _WakeStrength), p, max(length(dpx), length(dpy)));
+                // white foam on the waves: the sun on its facets (a little wrap: foam scatters) and the sky's light from
+                // above, by the sea's own normal here (Scatterer's slopes, per pixel, as the water beside it is lit;
+                // without them the ocean mesh's, which has only its larger waves) with the wakes' added; thin foam
+                // greyer (the sea through it). As Scatterer's tone map would bring it to the screen, exposed so that
+                // flat foam sits mid-curve: facets toward the sun brighter, those away clearly darker (higher up the
+                // curve flattened them all to the same white)
+                // (its slopes x _WWFoamShade: a light breeze's are ~0.05, a few per cent of diffuse light; the water's
+                // reflection shows them far more, and the foam beside it looked flat)
+                float3 nl = _WWFftOn > 0.5 ? normalize(lerp(up, FftNormal(p), _WWFoamShade) - grad) : normalize(lerp(up, nf, saturate(_WWFoamShade)));
+                float lit = saturate(dot(nl, _WWSunDir) * 0.85 + 0.15);
+                float sky = 0.55 + 0.45 * dot(nl, up);
+                if (_WakeDebugHalf > 3.5 && i.uv.x < 0.5)     // (lighting test: the foam's sun term over the left half's sea)
+                    return float4(lit.xxx * 0.9, 0);
+                float3 foam = 1 - exp(-(_WWSunColor * lit + _WWAmbient * sky * 0.6) * 2.4 * _WWFoamBright * lerp(0.8, 1, f));
+                // ... and wet: a sheen of the water's own reflection (the target: Scatterer's shaded sea) through it, its
+                // glints and sky on the same waves
+                // ... over the bubbles' turquoise glow, in the water under its reflection (added to it, where the surface
+                // is clear of foam)
+                add += BubbleLight(mf.g * _WakeStrength, p, n1, v);
+                return float4(add * (1 - f) + foam * f * (1 - 0.3 * _WWFoamSheen), scale * (1 - f + _WWFoamSheen * f));
+            }
+            ENDCG
+        }
+
+        // 7: the bubbles under our foam on the deferred ocean (0.09+), after Scatterer has shaded the sea
+        //    (AfterImageEffectsOpaque): the turquoise light they send up through the water, added under its reflection
+        //    where the surface is clear of foam (its foam buffer, ours already in it: pass 0's coverage over _WWFoamCover)
+        Pass
+        {
+            Blend One One
+            ColorMask RGB
+            CGPROGRAM
+            #pragma vertex vert
+            #pragma fragment frag
+            #pragma target 3.0
+            float4 frag(v2f i) : SV_Target
+            {
+                float raw = tex2D(oceanGbufferDepth, i.uv).r;
+                if (IsOcean(raw) < 0.5 || _WWBubbles <= 0)
+                    return 0;
+                float3 p = WorldFromDevice(i.uv, raw, _WakeFlipY);
+                float b = MapFoam(p).g * _WakeStrength;
+                if (b <= 0.002)
+                    return 0;
+                float s = saturate(tex2D(oceanGbufferFoam, i.uv).r / max(_WWFoamCover, 0.05));
+                float4 senc = tex2D(oceanGbufferNormalsAndSigma, i.uv);
+                float3 sn = float3(senc.xy * 2 - 1, 0);
+                sn.z = sqrt(saturate(1 - dot(sn.xy, sn.xy))) * (senc.w > 0 ? 1 : -1);
+                return float4(BubbleLight(b, p, sn, normalize(_WWCamPos - p)) * (1 - s), 0);
             }
             ENDCG
         }

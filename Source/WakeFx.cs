@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
+using UnityEngine.Rendering;
 using Random = UnityEngine.Random;
 
 namespace WaterWakes
@@ -33,6 +34,7 @@ namespace WaterWakes
             public float top;        // its highest point above its water level (m)
             public float w = 1;      // 1 at the surface, fading to 0 as a part sinks wholly under (submergedFade)
             public int group;
+            public float enterT = -1;   // when its part went in from the air (Wetting.enterT; -1: it has not)
             // its waterline's outline: from pf0 (aft) to pf1 (fore), its lowest and highest s in each of Bins stations
             public float pf0, pf1;
             public readonly float[] lo = new float[Bins], hi = new float[Bins];
@@ -230,8 +232,17 @@ namespace WaterWakes
             public float lbSkirt, skirtArea, skirtSpread, spreadMax;
             public Vector2 tilt;     // where it first touched, off its outline's middle (f, s; over its half-width, at most 1): a tilted body's low side
             public float flat;       // how flat its wetted bottom is (its submerged vertices all at one depth: a flat face square on), at most so far
+            // the way its waterline sweeps across it and how one-sidedly (f, s; at most 1): toward its high side, the side
+            // that goes in later. Where it first touched off its outline's middle (tilt: touched at its edge, the sweep
+            // is all one way) x how tilted its bottom met the water (the slope the sweep takes, U / its speed across,
+            // over SweepFullSlope: a sweep too quick to see is a flat slam, round)
+            public Vector2 sweep;
             public bool impacted;
             public double lat, lon, alt0;
+            // its waterline's length and breadth (f, s) last frame, and their growth (m/s, smoothed): a hull slamming down
+            // by its own motion, its waterline sweeping along it (a surfacing sub's bow falling back)
+            public float wlL, wlB, growL, growB;
+            public bool wlSeen;
         }
 
         // a slam into the water, kept after the part has gone on: the cavity behind it closes 2.4 sqrt(R / g) later
@@ -256,6 +267,7 @@ namespace WaterWakes
             public CelestialBody body;
             public double lat, lon;
             public float D, U, t, delay, dur, amp;
+            public float band;   // the whitewater its crest churns up as it spreads (a blunt, hard hit's): 0 none
         }
 
         private readonly List<Ring> rings = new List<Ring>();
@@ -281,12 +293,20 @@ namespace WaterWakes
             public float spreadMax;  // ... its fastest so far
             public Vector2 tilt;     // its entry's low side (Wetting.tilt)
             public float flat;       // ... and how flat it hit (Wetting.flat)
+            public Vector2 sweep;    // ... the way its waterline swept, toward its high side (Wetting.sweep)
+            public bool hull;        // a hull slamming down by its own motion (not an entry from the air): hullV its waterline's
+            public float hullV, growL, growB;   // fastest point's speed into the water, growL / growB its waterline's growth (m/s)
+            public float hullTan;    // tan of its long axis' (part y) pitch to the water: its waterline sweeps along it at hullV / hullTan
+            public float hullFwd;    // the way along f its waterline sweeps (toward the end going in fastest: the bow), +-1
         }
 
         private static WakeSettings Cfg => WakeSettings.Current;
 
         private ParticleSystem foam, spray, sheet, mist, skirt;
         private ParticleSystem haze;   // a hard hit's glowing spray haze (additive)
+        private ParticleSystem splashMist;   // ... and the mist its sheet turns to
+        private ParticleSystem splashCloud;  // ... and its sheet's clouds of drops
+        private const float SplashMistAlpha = 0.16f, SplashCloudFall = 0.4f;   // (the clouds' fall: x gravity)
         private ParticleSystem.Particle[] hazeBuf;
 
         // the haze: its alpha each frame, kept out of the clear zones (as far as each puff reaches)
@@ -311,6 +331,7 @@ namespace WaterWakes
         private ParticleSystem splashFoam;
         // the skirt's and the sheet's look: faded soft blobs (the legacy shader) or eroded crisp ones (WaterWakes/Spray)
         private Material skirtSoft, sheetSoft, skirtCrisp, sheetCrisp;
+        private ParticleSystem slamSpray;   // a hull slam's (and a breach's shedding) spray: clouds of droplets (DropCloudTexture)
         private int crispApplied = -1;
         private static readonly List<ParticleSystemVertexStream> SoftStreams = new List<ParticleSystemVertexStream>
         {
@@ -368,7 +389,8 @@ namespace WaterWakes
                 if (Time.time < lf.at)
                     continue;
                 // (inside a clear zone, as far as the patch would reach: it waits, laid as the zone closes)
-                if (holes.Count > 0 && HoleFactor(lf.pos, 1.3f, 2.4f, 0.35f * lf.size) < 0.98f)
+                // (the zone its whole size from the hit: the first patches, laid while it opened, lay grey in the dark ring)
+                if (holes.Count > 0 && HoleFactor(lf.pos, 1.3f, 1.9f, 0.35f * lf.size, true) < 0.98f)
                 {
                     lf.at = Time.time + Random.Range(0.1f, 0.3f);
                     lateFoam[i] = lf;
@@ -450,7 +472,7 @@ namespace WaterWakes
             foreach (Upwell u in upwells)
             {
                 float age = Time.time - u.t0;
-                if (age < 1.6f || age > 4.5f)
+                if (age < 0.7f || age > 4.5f)
                     continue;
                 Vector3 c = u.v.CoM, up = ((Vector3)((Vector3d)c - u.v.mainBody.position)).normalized;
                 Vector3 site = c - up * (float)u.v.mainBody.GetAltitude(c);
@@ -463,13 +485,13 @@ namespace WaterWakes
                     float th = Random.value * 2 * Mathf.PI, r = Mathf.Lerp(0.5f * u.eD, 3.0f * u.eD, Mathf.Sqrt(Random.value));
                     Vector3 radial = e1 * Mathf.Cos(th) + e2 * Mathf.Sin(th);
                     float size = Random.Range(1.8f, 3.2f) * big, sa = Mathf.Sqrt(Random.Range(1f, 1.5f));
-                    upwell.Emit(new ParticleSystem.EmitParams
+                    WakeStats.Emit(upwell, new ParticleSystem.EmitParams
                     {
                         position = site + radial * r + up * cfg.foamLift,
                         velocity = radial * Random.Range(0.05f, 0.25f),
                         startSize3D = new Vector3(size / sa, size * sa, size),
                         startLifetime = Random.Range(10f, 13f),
-                        rotation3D = new Vector3(0, 0, Random.value * 360f),
+                        rotation3D = FlatRotation(upwell.transform, Random.value * 360f),
                         startColor = Tint(light * 0.95f, Mathf.Min(1, cfg.foamAlpha * 1.2f)),
                     }, 1);
                     emittedFoam++;
@@ -477,30 +499,89 @@ namespace WaterWakes
             }
         }
 
-        // 0 inside the clear zones (within inner x their radius, horizontally), 1 outside outer x it; each opening over 0.4 s
-        private float HoleFactor(Vector3 p, float inner, float outer, float reach = 0, bool full = false)
+        // 0 inside the clear zones (within inner x their radius, horizontally), 1 outside outer x it; each opening over 0.45 s
+        // (seen: also where the camera sees p against the water, so the spray flying over the zone's near side does not hide it)
+        private Vector3 eye;
+        private float HoleFactor(Vector3 p, float inner, float outer, float reach = 0, bool full = false, bool seen = false)
         {
             float f = 1;
             for (int i = 0; i < holes.Count; i++)
             {
                 Hole h = holes[i];
                 float age = Time.time - h.t0;
-                float r = h.r * (full ? 1 : Mathf.Clamp01(age / 0.4f)) * (1 - Mathf.Clamp01(age - 2));   // (full: its whole size from the hit)
+                // (closing from 1.3 s to 2.1 s: Apollo's dark ring open by 0.3 s, widest at ~1 s, misted over by 1.5 s)
+                float r = h.r * (full ? 1 : Mathf.Clamp01(age / 0.45f)) * (1 - Mathf.Clamp01((age - 1.3f) / 0.8f));   // (full: its whole size from the hit)
                 if (h.v == null || r < 0.01f)
                     continue;
-                Vector3 c = h.v.CoM + h.shift * Mathf.Clamp01(age / 0.4f), up = ((Vector3)((Vector3d)h.v.CoM - h.v.mainBody.position)).normalized;
+                Vector3 c = h.v.CoM + h.shift * Mathf.Clamp01(age / 0.45f), up = ((Vector3)((Vector3d)h.v.CoM - h.v.mainBody.position)).normalized;
                 Vector3 d = p - c;
-                d -= up * Vector3.Dot(d, up);
+                float hgt = Vector3.Dot(d, up);
+                d -= up * hgt;
                 f = Mathf.Min(f, Smooth(inner * r, outer * r, Mathf.Max(0, d.magnitude - reach)));
+                float den = Vector3.Dot(p - eye, up);
+                // (only looking down on it: from near the water every drop this side of it would go)
+                if (seen && hgt > 0 && den < -0.5f && den < -0.5f * (p - eye).magnitude)
+                {
+                    d = p + (p - eye) * (-hgt / den) - c;
+                    d -= up * Vector3.Dot(d, up);
+                    f = Mathf.Min(f, Smooth(inner * r, outer * r, Mathf.Max(0, d.magnitude - reach)));
+                }
             }
             return f;
+        }
+
+        private const float SkirtLength = 1.5f, SkirtStretch = 0.035f;   // the skirt's streaks: x their width long, and more by their speed (s)
+
+        // a system's particles' alpha (a0 outside) by the clear zones, each reaching reach x its size
+        // how much sheet an entry throws for its speed: as its energy, U^3 (its sheet's mass and speed both), all of it from 9.4 m/s (the capsule under its
+        // parachutes, the splash the amounts were fitted to); Orion's straight drops: at 6 m/s a thin see-through sheet
+        // and a ring of foam at the hull, at 7 m/s a white wall two widths high
+        private static float SkirtEnergy(float U) => Mathf.Clamp(U * U * U / (9.4f * 9.4f * 9.4f), 0.05f, 1.5f);
+
+        // how long after it touches an entering part's waterline can still throw a sheet as it grows (s): a body going
+        // in edge first pitches down onto the water and slams the rest of its face in some tenths of a second later
+        // (Orion's 2013 drop at 27 deg: its big sheet off the high side comes at ~0.4-0.7 s)
+        private const float SkirtWindow = 0.7f;
+
+        // a point of an entering part's waterline under a part of its craft that went in before it (its sheet cannot leave
+        // there); one that went in after it, above it (the pod over its heat shield), hides nothing: the sheet leaves
+        // under it. A slow, tilted entry's sweep was still under way when the pod got wet, and lost its high side's sheet
+        private bool HiddenSkirt(float x, float y, Cut own, float enterT)
+        {
+            foreach (Cut c in cuts)
+                if (c != own && !(c.enterT > enterT + 0.01f) && c.UnderRoof(x, y, 0.1f))
+                    return true;
+            return false;
+        }
+
+        private void ClearZone(ParticleSystem ps, float a0, float reach)
+        {
+            int n = ps != null ? ps.particleCount : 0;
+            if (n == 0)
+                return;
+            if (skirtBuf == null || skirtBuf.Length < ps.main.maxParticles)
+                skirtBuf = new ParticleSystem.Particle[Mathf.Max(ps.main.maxParticles, skirt.main.maxParticles)];
+            n = ps.GetParticles(skirtBuf, n);
+            for (int i = 0; i < n; i++)
+            {
+                Color32 col = skirtBuf[i].startColor;
+                float own = skirtBuf[i].axisOfRotation.x;   // (its own alpha, if it was given one when emitted)
+                col.a = (byte)(Mathf.Clamp01((own > 0 && own <= 1 ? own : a0) * HoleFactor(skirtBuf[i].position, 1.25f, 1.7f, reach * skirtBuf[i].GetCurrentSize(ps), false, true)) * 255);
+                skirtBuf[i].startColor = col;
+            }
+            ps.SetParticles(skirtBuf, n);
         }
 
         private void Skirt(WakeSettings cfg)
         {
             holes.RemoveAll(h => h.v == null || Time.time - h.t0 > 3.2f);
+            if (holes.Count == 0)
+                return;
+            // (the drop clouds and the mist flying with the sheet kept out of the zone too, as far as each reaches)
+            ClearZone(splashCloud, Mathf.Min(1, cfg.sheetAlpha * 1.9f), 0.4f);
+            ClearZone(splashMist, SplashMistAlpha, 0.4f);
             int n = skirt.particleCount;
-            if (holes.Count == 0 || n == 0)
+            if (n == 0)
                 return;
             if (skirtBuf == null || skirtBuf.Length < skirt.main.maxParticles)
                 skirtBuf = new ParticleSystem.Particle[skirt.main.maxParticles];
@@ -509,7 +590,10 @@ namespace WaterWakes
             for (int i = 0; i < n; i++)
             {
                 Color32 col = skirtBuf[i].startColor;
-                col.a = (byte)(Mathf.Clamp01(a0 * HoleFactor(skirtBuf[i].position, 1.3f, 2.4f)) * 255);
+                // (as far as its streak reaches: its half length, stretched by its speed as the renderer does)
+                float half = 0.5f * skirtBuf[i].GetCurrentSize(skirt) * (SkirtLength + SkirtStretch * skirtBuf[i].velocity.magnitude);
+                float own = skirtBuf[i].axisOfRotation.x;
+                col.a = (byte)(Mathf.Clamp01((own > 0 && own <= 1 ? own : a0) * HoleFactor(skirtBuf[i].position, 1.25f, 1.7f, 0.7f * half, false, true)) * 255);
                 skirtBuf[i].startColor = col;
             }
             skirt.SetParticles(skirtBuf, n);
@@ -584,6 +668,8 @@ namespace WaterWakes
                 var mat = new Material(foamSh) { mainTexture = foam.GetComponent<ParticleSystemRenderer>().sharedMaterial.mainTexture };
                 mat.SetFloat("_Crisp", 0.6f);   // (feathered: softer than a sheet blob's edge)
                 mat.SetFloat("_Bright", 1.2f);
+                mat.SetFloat("_Under", 0.55f);
+                mat.SetFloat("_Churn", 1);   // (painted as whitewater, not the wake's lace: OceanFoam's Whitewater)
                 splashFoam = Make("WaterWakes splash foam", mat, 8000, true);
                 var fm = splashFoam.main;
                 fm.startSize3D = true;
@@ -607,6 +693,7 @@ namespace WaterWakes
                 var um = new Material(foamSh) { mainTexture = mat.mainTexture };
                 um.SetFloat("_Crisp", 0.85f);
                 um.SetFloat("_Bright", 1.1f);
+                um.SetFloat("_Under", 1f);   // (bubbles welling up: mostly under the surface)
                 upwell = Make("WaterWakes upwell", um, 4000, true);
                 var um2 = upwell.main;
                 um2.startSize3D = true;
@@ -684,8 +771,8 @@ namespace WaterWakes
                 rot.z = new ParticleSystem.MinMaxCurve(-0.6f, 0.6f);
                 var r = skirt.GetComponent<ParticleSystemRenderer>();
                 r.renderMode = ParticleSystemRenderMode.Stretch;
-                r.velocityScale = 0.025f;
-                r.lengthScale = 1f;
+                r.velocityScale = SkirtStretch;
+                r.lengthScale = SkirtLength;
             }
 
             // crisp sheets: the skirt's and the sheet's blobs eroded by their fading alpha and age instead of faded
@@ -697,10 +784,78 @@ namespace WaterWakes
                 Texture2D et = ErodeTexture();
                 skirtCrisp = new Material(spraySh) { mainTexture = et };
                 skirtCrisp.SetVector("_Erode", new Vector4(0.12f, 0.75f, 0.25f, 0.4f));
-                skirtCrisp.SetFloat("_Bright", 1.2f);
+                skirtCrisp.SetFloat("_Bright", 1.04f);   // (its streaks' and drops' shading kept under white)
+                skirtCrisp.SetFloat("_Fade", 1);
+                skirtCrisp.SetFloat("_Rim", 0);   // (evenly lit: one smooth streaky sheet, not scales)
                 sheetCrisp = new Material(spraySh) { mainTexture = et };
                 sheetCrisp.SetVector("_Erode", new Vector4(0.1f, 0.5f, 0.3f, 0.4f));
                 sheetCrisp.SetFloat("_Bright", 1.1f);
+                TestDepthByHand(skirtCrisp);
+                TestDepthByHand(sheetCrisp);
+            }
+            // a hull slam's spray: each particle a cloud of droplets over a faint haze, the haze eroding first as it thins
+            // and ages, then the smaller drops: seen as water thrown up in drops, not soft white blobs. Slowed by the air
+            // as the skirt's sheet is
+            if (spraySh != null)
+            {
+                var dm = new Material(spraySh) { mainTexture = DropCloudTexture() };
+                dm.SetVector("_Erode", new Vector4(0.06f, 0.55f, 0.45f, 0.6f));
+                dm.SetFloat("_Bright", 1.15f);
+                TestDepthByHand(dm);
+                slamSpray = Make("WaterWakes slam spray", dm, 16000, false);
+                var sol = slamSpray.sizeOverLifetime;
+                sol.enabled = true;
+                sol.size = new ParticleSystem.MinMaxCurve(1f, new AnimationCurve(new Keyframe(0, 0.6f), new Keyframe(0.3f, 1.1f), new Keyframe(1, 1.8f)));
+                var fol = slamSpray.forceOverLifetime;
+                fol.enabled = true;
+                fol.space = ParticleSystemSimulationSpace.World;
+                var lv = slamSpray.limitVelocityOverLifetime;
+                lv.enabled = true;
+                lv.limit = 1000;
+                lv.drag = 0.06f;
+                lv.multiplyDragByParticleVelocity = true;
+                lv.multiplyDragByParticleSize = false;
+                Fade(slamSpray, 0.03f, 0.5f);
+                RandomFrame(slamSpray);
+                var rot = slamSpray.rotationOverLifetime;
+                rot.enabled = true;
+                rot.z = new ParticleSystem.MinMaxCurve(-0.5f, 0.5f);
+                var r = slamSpray.GetComponent<ParticleSystemRenderer>();
+                r.renderMode = ParticleSystemRenderMode.Stretch;
+                r.velocityScale = 0.01f;
+                r.lengthScale = 1.1f;   // (never thinner than it is wide: seen end on, flying at the camera, it stays a cloud)
+                r.SetActiveVertexStreams(AgedStreams);
+
+                // an entry's sheet as drop clouds: the same, slowed far more by the air and falling slowly (fine spray:
+                // Orion's sheet a billowing cloud standing 1-2 s), thinning out late
+                var cm = new Material(spraySh) { mainTexture = dm.mainTexture };
+                cm.SetVector("_Erode", new Vector4(0.06f, 0.55f, 0.4f, 0.6f));
+                cm.SetFloat("_Bright", 1.1f);
+                cm.SetFloat("_Fade", 0.6f);
+                TestDepthByHand(cm);
+                splashCloud = Make("WaterWakes splash cloud", cm, 12000, false);
+                var csol = splashCloud.sizeOverLifetime;
+                csol.enabled = true;
+                csol.size = new ParticleSystem.MinMaxCurve(1f, new AnimationCurve(new Keyframe(0, 0.5f), new Keyframe(0.25f, 1.1f), new Keyframe(1, 2.3f)));
+                var cfol = splashCloud.forceOverLifetime;
+                cfol.enabled = true;
+                cfol.space = ParticleSystemSimulationSpace.World;
+                var clv = splashCloud.limitVelocityOverLifetime;
+                clv.enabled = true;
+                clv.limit = 1000;
+                clv.drag = 0.2f;
+                clv.multiplyDragByParticleVelocity = true;
+                clv.multiplyDragByParticleSize = false;
+                Fade(splashCloud, 0.03f, 0.5f);
+                RandomFrame(splashCloud);
+                var crot = splashCloud.rotationOverLifetime;
+                crot.enabled = true;
+                crot.z = new ParticleSystem.MinMaxCurve(-0.4f, 0.4f);
+                var cr = splashCloud.GetComponent<ParticleSystemRenderer>();
+                cr.renderMode = ParticleSystemRenderMode.Stretch;
+                cr.velocityScale = 0.01f;
+                cr.lengthScale = 1.1f;
+                cr.SetActiveVertexStreams(AgedStreams);
             }
             Debug.Log($"[WaterWakes] spray shader {(spraySh != null ? spraySh.name : "none (soft only)")}, splash foam {(splashFoam != null ? "crisp" : "in the main foam")}");
             ApplySprayLook(Cfg.crispSpray);
@@ -728,6 +883,30 @@ namespace WaterWakes
                 hrot.enabled = true;
                 hrot.z = new ParticleSystem.MinMaxCurve(-0.3f, 0.3f);
                 Debug.Log($"[WaterWakes] haze shader {(add != null ? add.name : sh.name + " (no additive found)")}");
+            }
+
+            // a hard splash's mist: soft puffs slowed by the air to a near stop, swelling, hanging seconds, at any height
+            splashMist = Make("WaterWakes splash mist", Mat(sh, PuffTexture(), true), 3000, false);
+            {
+                var sol = splashMist.sizeOverLifetime;
+                sol.enabled = true;
+                sol.size = new ParticleSystem.MinMaxCurve(1f, new AnimationCurve(new Keyframe(0, 0.5f), new Keyframe(0.2f, 1.3f), new Keyframe(1, 2.6f)));
+                var lv = splashMist.limitVelocityOverLifetime;
+                lv.enabled = true;
+                lv.limit = 1000;
+                lv.drag = 0.14f;
+                lv.multiplyDragByParticleVelocity = true;
+                lv.multiplyDragByParticleSize = false;
+                var col = splashMist.colorOverLifetime;
+                col.enabled = true;
+                var g = new Gradient();
+                g.SetKeys(new[] { new GradientColorKey(Color.white, 0), new GradientColorKey(Color.white, 1) },
+                          new[] { new GradientAlphaKey(0, 0), new GradientAlphaKey(1, 0.12f), new GradientAlphaKey(0.7f, 0.5f), new GradientAlphaKey(0, 1) });
+                col.color = g;
+                RandomFrame(splashMist);
+                var rot = splashMist.rotationOverLifetime;
+                rot.enabled = true;
+                rot.z = new ParticleSystem.MinMaxCurve(-0.25f, 0.25f);
             }
 
             // mist: its opacity set each frame from each puff's height (Mist()); the age fade only eases it in and out
@@ -803,7 +982,7 @@ namespace WaterWakes
                 Instance = null;
             if (stockSplashes != null && fxMonger != null)
                 fxMonger.splashes = stockSplashes;
-            foreach (ParticleSystem ps in new[] { foam, spray, sheet, mist, skirt, splashFoam, upwell, haze })
+            foreach (ParticleSystem ps in new[] { foam, spray, sheet, mist, skirt, splashFoam, upwell, haze, slamSpray, splashMist, splashCloud })
                 if (ps != null)
                 {
                     FloatingOrigin.UnregisterParticleSystem(ps);
@@ -820,6 +999,7 @@ namespace WaterWakes
             if (cam == null)
                 return;
             ApplySprayLook(Cfg.crispSpray);
+            eye = cam.transform.position;
             // (the spray's soft particles read the scene's depth)
             if ((cam.depthTextureMode & DepthTextureMode.Depth) == 0)
                 cam.depthTextureMode |= DepthTextureMode.Depth;
@@ -917,7 +1097,7 @@ namespace WaterWakes
                 if (walls.Count > 0)
                     buf[i].position = OffTheWalls(buf[i].position, 0.45f * buf[i].GetCurrentSize(mist));
                 double h = ((Vector3d)buf[i].position - c).magnitude - r;
-                float a = cfg.mistAlpha * Mathf.Exp(-Mathf.Max(0, (float)h) * k) * HoleFactor(buf[i].position, 1.3f, 2.6f, 0.45f * buf[i].GetCurrentSize(mist));
+                float a = cfg.mistAlpha * Mathf.Exp(-Mathf.Max(0, (float)h) * k) * HoleFactor(buf[i].position, 1.3f, 1.9f, 0.45f * buf[i].GetCurrentSize(mist));
                 Color32 col = buf[i].startColor;
                 col.a = (byte)(Mathf.Clamp01(a) * 255);
                 buf[i].startColor = col;
@@ -1077,6 +1257,23 @@ namespace WaterWakes
                     wt.rate = Mathf.Lerp(wt.rate, (vol - wt.vol) / dt, Mathf.Clamp01(dt / 0.08f));
                 wt.vol = vol;
                 wt.seen = true;
+                if (wf1 >= wf0)
+                {
+                    float wlen = wf1 - wf0, wbr = ws1 - ws0, kk = Mathf.Clamp01(dt / 0.1f);
+                    if (wt.wlSeen && dt > 0)
+                    {
+                        wt.growL = Mathf.Lerp(wt.growL, (wlen - wt.wlL) / dt, kk);
+                        wt.growB = Mathf.Lerp(wt.growB, (wbr - wt.wlB) / dt, kk);
+                    }
+                    wt.wlL = wlen;
+                    wt.wlB = wbr;
+                    wt.wlSeen = true;
+                }
+                else
+                {
+                    wt.wlSeen = false;
+                    wt.growL = wt.growB = 0;
+                }
                 Entry(wt, p, body, origin, f, s, up, volBox > 0 ? vol / volBox : 0, wpts, dt, cfg);
                 if (cut != null || Mathf.Abs(wt.rate) > 1e-3f)
                 {
@@ -1094,25 +1291,85 @@ namespace WaterWakes
                     float slam = Mathf.Max(cfg.splashMinSpeed, 0.5f * Mathf.Sqrt(9.81f * Mathf.Max(0, cut != null ? cut.draft : 0)));
                     float fcs = atLine ? (wf0 + wf1) * 0.5f : cut != null ? (cut.fMin + cut.fMax) * 0.5f : 0;
                     float scs = atLine ? (ws0 + ws1) * 0.5f : cut != null ? (cut.sMin + cut.sMax) * 0.5f : 0;
-                    if (speed > slam && (atLine || cut != null) && !(wt.rate < 0 && Vector3.Dot(pv, up) < 0.3f) && !Hidden(fcs, scs, cut))
+                    // ... but a hull slamming down by its own motion splashes as hard as its waterline goes in, however deep
+                    // it is: each waterline point's own speed into the water (the hull turning included: a surfacing sub's
+                    // bow falls back at ~7 m/s while its stern barely moves, its mean over the whole waterline ~3, under the
+                    // bar above, which threw next to nothing). A ship riding waves moves slowly itself (the water moves),
+                    // so it stays under hullSlamSpeed. The splash then along the stretch going in fastest
+                    bool airEntry = wt.enterT >= 0 && Time.time - wt.enterT < 2f && wt.U > 3f;
+                    float hullV = 0, hf0 = float.MaxValue, hf1 = float.MinValue, hx = 0;
+                    // (and as it rises fast out of the water, a breach: the water it lifts pouring off it, EmitHullShed)
+                    float sg = wt.rate > 0 ? -1 : 1;
+                    if (atLine && p.rb != null && !airEntry && Mathf.Abs(wt.rate) > 1e-3f)
+                    {
+                        Vector3 fv = Krakensbane.GetFrameVelocity();
+                        foreach (Vector2 q in wpts)
+                        {
+                            float vq = sg * Vector3.Dot(p.rb.GetPointVelocity(origin + f * q.x + s * q.y) + fv, up);
+                            if (vq > hullV)
+                            {
+                                hullV = vq;
+                                hx = q.x;
+                            }
+                        }
+                        foreach (Vector2 q in wpts)
+                            if (sg * Vector3.Dot(p.rb.GetPointVelocity(origin + f * q.x + s * q.y) + fv, up) > 0.6f * hullV)
+                            {
+                                hf0 = Mathf.Min(hf0, q.x);
+                                hf1 = Mathf.Max(hf1, q.x);
+                            }
+                    }
+                    bool hullSlam = hullV > Mathf.Max(cfg.hullSlamSpeed, cfg.splashMinSpeed + 0.5f) && hf1 >= hf0;
+                    // (the stretch: from just behind its fastest end (the bow: the colliders' boxes run past its rounded
+                    // nose, ~half its beam) back along it; centred on the fastest point, the spray stood out past the nose)
+                    // (the stretch: where its bottom is meeting the water, the waterline's end on the side going in fastest (the
+                    // keel's contact, moving forward as a falling bow comes down), from ~1.2 beams behind it to a little ahead:
+                    // the spray comes from there, not off the hull already in)
+                    float hL = L, hfc = fcs, aft = 0;
+                    if (hullSlam)
+                    {
+                        aft = hx > (wf0 + wf1) * 0.5f ? -1 : 1;
+                        float contact = aft < 0 ? wf1 : wf0;
+                        hL = 1.4f * B;
+                        hfc = contact + aft * 0.5f * B;
+                    }
+                    // (a part in its first 0.25 s in from the air is not hidden by one over it: a heat shield's sheet leaves round
+                    // its rim though the pod above it is wet by then (each drop of it is still checked where it starts))
+                    bool skirting = wt.enterT >= 0 && Time.time - wt.enterT < SkirtWindow && !(wt.rate < 0);
+                    // (... and splashes however little of its volume has gone in yet: a thin plate hitting level wets its whole
+                    // face in one frame, when its submerged volume's (smoothed) rate is still under the bar, and threw no sheet)
+                    bool slamIn = skirting && airEntry && wt.skirtArea > 0;
+                    if (slamIn)
+                        speed = Mathf.Max(speed, wt.un);   // (still under a deep hull's bar if it goes in slower than that)
+                    if ((speed > slam || hullSlam) && (atLine || cut != null) && !(wt.rate < 0 && Vector3.Dot(pv, up) < 0.3f) && (skirting || !Hidden(fcs, scs, cut)))
                     {
                         splashes.Add(new Splash
                         {
-                            fc = atLine ? (wf0 + wf1) * 0.5f : (cut.fMin + cut.fMax) * 0.5f,
+                            fc = hullSlam ? hfc : atLine ? (wf0 + wf1) * 0.5f : (cut.fMin + cut.fMax) * 0.5f,
                             sc = atLine ? (ws0 + ws1) * 0.5f : (cut.sMin + cut.sMax) * 0.5f,
-                            L = Mathf.Max(0.2f, L), B = Mathf.Max(0.2f, B), wl = wlRel, speed = speed - (slam - cfg.splashMinSpeed), outOf = wt.rate < 0, vel = pv - up * Vector3.Dot(pv, up), own = cut,
+                            L = Mathf.Max(0.2f, hullSlam ? hL : L), B = Mathf.Max(0.2f, B), wl = wlRel, outOf = wt.rate < 0, vel = pv - up * Vector3.Dot(pv, up), own = cut,
+                            speed = hullSlam ? Mathf.Max(hullV, speed - (slam - cfg.splashMinSpeed)) : speed - (slam - cfg.splashMinSpeed),
+                            hull = hullSlam, hullV = hullV, growL = wt.growL, growB = wt.growB,
+                            hullTan = Mathf.Tan(Mathf.Asin(Mathf.Clamp01(Mathf.Abs(Vector3.Dot(p.transform.up, up))))), hullFwd = -aft,
                             domed = wt.enterT >= 0 && Time.time - wt.enterT > wt.sealAt,
                             entry = wt.enterT >= 0 && Time.time - wt.enterT < 2f && wt.U > 3f && !(wt.rate < 0),
                             eU = Mathf.Min(wt.U, cfg.splashMaxSpeed), eD = Mathf.Max(0.2f, Mathf.Sqrt(wt.LB)), since = Time.time - wt.enterT,
                             keep = wt.U > 0.1f ? Mathf.Clamp01(wt.un / wt.U) : 1,
-                            skirtArea = wt.skirtArea, skirtSpread = wt.skirtSpread, spreadMax = wt.spreadMax, tilt = wt.tilt, flat = wt.flat,
+                            skirtArea = wt.skirtArea, skirtSpread = wt.skirtSpread, spreadMax = wt.spreadMax, tilt = wt.tilt, flat = wt.flat, sweep = wt.sweep,
                         });
+                        // its sound: a slam (an entry from the air, a hull slamming down) or a breach, as fast as it went in or
+                        // out, as big as its waterline (the hull slam's stretch)
+                        Splash last = splashes[splashes.Count - 1];
+                        float su = last.hull ? last.hullV : airEntry ? Mathf.Max(wt.U, last.speed) : last.speed;
+                        WakeSounds.Instance?.Splash(p.vessel != null ? (object)p.vessel : p, last.outOf ? WakeSounds.Kind.Breach : WakeSounds.Kind.Slam,
+                                                    origin + f * last.fc + s * last.sc + up * last.wl, su, last.L, last.B, airEntry);
                     }
                 }
 
                 if (cut == null)
                     continue;
                 cut.top = top;
+                cut.enterT = wt.enterT;
                 if (top < 0)
                 {
                     cut.w = 1 + top / fade;
@@ -1466,7 +1723,7 @@ namespace WaterWakes
                                 startLifetime = cfg.mistLife * Random.Range(0.7f, 1.3f),
                                 startColor = Tint(light, cfg.mistAlpha),   // alpha replaced by height each frame
                             };
-                            mist.Emit(ep, 1);
+                            WakeStats.Emit(mist, ep, 1);
                             emittedMist++;
                         }
                     }
@@ -1497,7 +1754,7 @@ namespace WaterWakes
         private void EmitSpray(Vector3 pos, Vector3 vel, float size, float life, Color32 color)
         {
             var ep = new ParticleSystem.EmitParams { position = pos, velocity = vel, startSize = size, startLifetime = life, startColor = color };
-            spray.Emit(ep, 1);
+            WakeStats.Emit(spray, ep, 1);
             emittedSpray++;
         }
 
@@ -1507,19 +1764,22 @@ namespace WaterWakes
             {
                 position = pos, velocity = vel, startSize = size, startLifetime = life, startColor = color, rotation = Random.value * 360f,
             };
-            sheet.Emit(ep, 1);
+            WakeStats.Emit(sheet, ep, 1);
             emittedSpray++;
         }
 
         private void Gravity(Vector3 up)
         {
             Vector3 g = -up * 9.81f;
-            foreach (ParticleSystem ps in new[] { spray, sheet, skirt })
+            foreach (ParticleSystem ps in new[] { spray, sheet, skirt, slamSpray, splashCloud })
             {
+                if (ps == null)
+                    continue;
+                float k = ps == splashCloud ? SplashCloudFall : 1;
                 var fol = ps.forceOverLifetime;
-                fol.x = g.x;
-                fol.y = g.y;
-                fol.z = g.z;
+                fol.x = g.x * k;
+                fol.y = g.y * k;
+                fol.z = g.z * k;
             }
         }
 
@@ -1690,21 +1950,22 @@ namespace WaterWakes
             bool crisp = splash && splashFoam != null && Cfg.crispSpray;
             if (holes.Count > 0)
             {
-                alpha *= splash ? 1 : HoleFactor(pos, 1.3f, 2.4f);   // (a splash patch is held until the zone closes: LayLateFoam)
+                alpha *= splash ? 1 : HoleFactor(pos, 1.3f, 2.4f, 0, true);   // (a splash patch is held until the zone closes: LayLateFoam)
                 if (alpha < 0.01f)
                     return;
             }
             float sa = Mathf.Sqrt(Mathf.Max(1, aspect));
+            ParticleSystem ps = crisp ? splashFoam : foam;
             var ep = new ParticleSystem.EmitParams
             {
                 position = pos,
                 velocity = vel,
                 startSize3D = new Vector3(size / sa, size * sa, size),
                 startLifetime = life,
-                rotation3D = new Vector3(0, 0, float.IsNaN(rot) ? Random.value * 360f : rot),
+                rotation3D = FlatRotation(ps.transform, float.IsNaN(rot) ? Random.value * 360f : rot),
                 startColor = Tint(light * 0.95f, alpha),
             };
-            (crisp ? splashFoam : foam).Emit(ep, 1);
+            WakeStats.Emit(ps, ep, 1);
             emittedFoam++;
         }
 
@@ -1839,40 +2100,115 @@ namespace WaterWakes
             // at 40-55 deg, its tip 3 D across by 0.1 s and 5 D by 0.3 s; the life here short for that, no air drag)
             if (sp.entry && !sp.outOf && sp.skirtArea > 0 && cfg.skirtAmount > 0)
             {
-                float vs = Mathf.Min(Mathf.Clamp(2.4f * sp.skirtSpread * cfg.skirtSpeed, sp.eU, 6f * sp.eU), 60f);
+                // (a face that hit flat: ~2 U. Its waterline's spread is only the frame's, and Orion's level drop tests show its
+                // white disc out ~0.5 widths in 0.1 s, 1.2 in 0.4 s, ~15 m/s from 7.5 m/s in)
+                // (measured like for like, in capsule widths: the level one's white edge is 0.75 widths out at 0.1 s, 1.15 at
+                // 0.4 s, 1.75 at 1 s, 2.2 at 1.5 s: mist, started at ~1.7 U and stopped by the air within a few metres
+                // (drag ~0.25 /m). So a flat hit's streaks are slow, 0.75 U, and its drop clouds (the air's drag theirs) fast;
+                // 12 deg off level the sheet is a true jet again, 2 widths out in 0.2 s. Flat: its face square on, or its
+                // waterline crossing it faster than ~11 U (the frame's limit))
+                // (flat only if it touched near its middle: an edge's first sliver in has its few wet vertices at one depth too)
+                float flatS = sp.flat * (1 - Mathf.Clamp01(sp.tilt.magnitude / 0.3f));
+                float flatK = Mathf.Max(flatS, 1 - Mathf.Clamp01((sp.eU / Mathf.Max(2 * sp.spreadMax, 0.1f) - 0.09f) / 0.08f));
+                float vs = Mathf.Min(Mathf.Clamp(2.4f * sp.skirtSpread * cfg.skirtSpeed, Mathf.Lerp(1f, 0.75f, flatK) * sp.eU, Mathf.Lerp(6f, 0.75f, flatK) * sp.eU), 60f);
                 // (a face that hit flat, most of its outline wet in one frame: its spread only frame-limited, the sheet flat)
                 float slope = Mathf.Atan2(sp.eU, Mathf.Max(sp.spreadMax, sp.skirtSpread, 0.2f * sp.eU)) * Mathf.Rad2Deg
-                              * (1 - 0.85f * sp.flat);
+                              * (1 - 0.85f * flatS);
                 // (a tilted body throws most of it off its HIGH side, the side that hits later (Apollo 15's footage): its
                 // contact line runs from the low edge across the whole shield, nearly flat to the water, its jet fastest that
                 // way, leaving off the high edge with the air squeezed out of the closing gap; its low edge, the backshell
                 // rising at once past it, throws a little, low and slow. As much again in all)
-                Vector2 low = sp.tilt;
+                // (as lopsided as its waterline swept one way: Wetting.sweep, none for a level slam, all of it past ~25 deg)
+                Vector2 low = -sp.sweep;
+                // (a part going in after another of its craft, in the same splash (a pod after its heat shield): thrown the
+                // way that one's sheet went, if more one-sidedly than its own waterline would have it (its own sweep is of
+                // its side wall meeting water the first has already parted), and no faster than three times its speed in)
+                float later = 1;
+                int first = splashVessel != null ? holes.FindIndex(h => h.v == splashVessel && Time.time - h.t0 < 1 && h.r > 0.05f) : -1;
+                if (first >= 0 && Time.time - sp.since > holes[first].t0 + 0.02f)
+                {
+                    Vector3 way = holes[first].shift / holes[first].r;
+                    var theirs = new Vector2(Vector3.Dot(way, f), Vector3.Dot(way, s));
+                    if (theirs.sqrMagnitude > low.sqrMagnitude)
+                    {
+                        low = -Vector2.ClampMagnitude(theirs, 1);
+                        vs = Mathf.Min(vs, 3f * sp.eU);
+                        later = 0.3f;   // (and a third as much: most of the water it would throw has gone with the first sheet)
+                    }
+                }
                 float lean = low.magnitude;
+                // (the share of its waterline over open water: a part going in over another of its craft already in (a pod
+                // above its heat shield) meets water that one has thrown aside, and throws no second sheet)
+                // (already in: earlier, or in the same frame and the lower of the two)
+                int covered = 0;
+                float enterT = Time.time - sp.since;
+                for (int k = 0; k < 8; k++)
+                {
+                    float ka = k * Mathf.PI / 4, kx = sp.fc + 0.45f * sp.L * Mathf.Cos(ka), ky = sp.sc + 0.45f * sp.B * Mathf.Sin(ka);
+                    foreach (Cut c in cuts)
+                        if (c != sp.own && c.enterT >= 0 && (c.enterT < enterT - 0.01f || c.enterT < enterT + 0.01f && sp.own != null && c.top < sp.own.top)
+                            && c.UnderRoof(kx, ky, -0.15f))
+                        {
+                            covered++;
+                            break;
+                        }
+                }
+                float fresh = 1 - covered / 8f;
                 // (as much as the waterline spread faster than the body went in: a flat end or a heat shield's whole area
                 // at once, a wedge's or a ball's by degrees, barely)
                 // (its waterline's peak spread measured: a wedge 0.73 U, a cylinder on its side 1.17, a ball 1.30, a flat end
                 // 1.90 (all of it in a frame), the capsule 2.19)
-                float blunt = Mathf.Clamp01(sp.skirtSpread / Mathf.Max(sp.eU, 0.1f) - 1f);
-                int ns = Mathf.Min(Count(sp.skirtArea * 240 * (1 + lean) * blunt * Mathf.Clamp01(sp.eU / 8f) * cfg.skirtAmount * cfg.intensity), 1800);
+                // (the contact line's own speed: a waterline spreading all one way, from an edge, moves twice as fast as its
+                // size's growth says. A capsule at 27 deg sweeps at ~2 U; by its size's growth, ~1 U, it sat at the bar, with
+                // a sheet at 9.4 m/s (a frame's worth more spread) and next to none at 6.3)
+                float blunt = Mathf.Clamp01(sp.skirtSpread * (1 + Mathf.Min(sp.tilt.magnitude, 1)) / Mathf.Max(sp.eU, 0.1f) - 1f);
+                // (and as see-through as the hit is gentle: Orion's 6 m/s drop a grey veil, its 8.5 m/s one a white wall)
+                float opacity = Mathf.Lerp(0.3f, 1f, Mathf.Clamp01((sp.eU - 5f) / 4f));
+                int ns = Mathf.Min(Count(sp.skirtArea * 150 * (1 + lean) * blunt * fresh * fresh * later * SkirtEnergy(sp.eU) * cfg.skirtAmount * cfg.intensity), 1800);
+                if (cfg.debugLog && sp.skirtArea > 0)
+                    Debug.Log($"[WaterWakes] skirt: {ns} blobs, U {sp.eU:F1} m/s, D {sp.eD:F2} m, spread {sp.skirtSpread:F1} m/s, sheet {vs:F1} m/s, sweep {sp.sweep} ({lean:F2}), over open water {fresh:F2}, blunt {blunt:F2}");
                 if (ns > 0 && splashVessel != null && !holes.Exists(h => h.v == splashVessel && Time.time - h.t0 < 3))
                 {
-                    holes.Add(new Hole { v = splashVessel, r = 0.75f * sp.eD, t0 = Time.time, shift = -(f * sp.tilt.x + s * sp.tilt.y) * 0.75f * sp.eD });
+                    holes.Add(new Hole { v = splashVessel, r = 0.65f * sp.eD, t0 = Time.time, shift = (f * sp.sweep.x + s * sp.sweep.y) * 0.65f * sp.eD });
                     upwells.Add(new Upwell { v = splashVessel, eD = sp.eD, t0 = Time.time });
+                }
+                // (its size grows over the entry's first moments, from a first frame's sliver of waterline: the zone and the
+                // upwelling sized by the largest so far, not left as small as it began)
+                else if (ns > 0 && splashVessel != null)
+                {
+                    int hi = holes.FindIndex(h => h.v == splashVessel && Time.time - h.t0 < 1);
+                    if (hi >= 0)
+                    {
+                        Hole h = holes[hi];
+                        h.r = Mathf.Max(h.r, 0.65f * sp.eD);
+                        Vector3 shift = -(f * low.x + s * low.y) * h.r;
+                        if (shift.sqrMagnitude > h.shift.sqrMagnitude)
+                            h.shift = shift;
+                        holes[hi] = h;
+                    }
+                    int ui = upwells.FindIndex(u => u.v == splashVessel && Time.time - u.t0 < 1 && u.eD < sp.eD);
+                    if (ui >= 0)
+                    {
+                        Upwell u = upwells[ui];
+                        u.eD = sp.eD;
+                        upwells[ui] = u;
+                    }
                 }
                 for (int i = 0; i < ns; i++)
                 {
-                    // (a starburst: two thirds of it in ~14 rays, their directions fixed for the entry (from its speed and
+                    // (a starburst: half of it in ~14 rays, their directions fixed for the entry (from its speed and
                     // size), the rest between them)
                     float th = Random.value * 2 * Mathf.PI;
-                    if (Random.value < 0.67f)
+                    if (Random.value < 0.5f)
                     {
                         int seed = Mathf.RoundToInt(sp.eU * 977 + sp.eD * 613), ray = Random.Range(0, 14);
                         float baseTh = (ray + Frac(Mathf.Sin(seed * 12.9898f + ray * 78.233f) * 43758.55f) * 0.8f) * (2 * Mathf.PI / 14);
                         th = baseTh + Random.Range(-0.06f, 0.06f);
                     }
                     float downhill = low.x * Mathf.Cos(th) + low.y * Mathf.Sin(th);
-                    if (Random.value * (1 + 1.2f * lean) > 1 - downhill)
+                    // (the low side's share thrown off the high side instead: most of it, not all (Apollo's white all round,
+                    // short on its low side))
+                    if (downhill > 0 && Random.value < 0.8f * lean * Mathf.Pow(downhill / lean, 0.7f))
                     {
                         th += Mathf.PI;
                         downhill = -downhill;
@@ -1882,29 +2218,93 @@ namespace WaterWakes
                     float lumpSeed = sp.eU * 0.731f + sp.eD * 1.913f;
                     float lump = 1 + 0.18f * Mathf.Sin(2 * th + lumpSeed * 5.1f) + 0.14f * Mathf.Sin(3 * th + lumpSeed * 8.7f) + 0.08f * Mathf.Sin(5 * th + lumpSeed * 3.3f);
                     float px = sp.fc + 0.5f * sp.L * Random.Range(0.9f, 1.05f) * Mathf.Cos(th), py = sp.sc + 0.5f * sp.B * Random.Range(0.9f, 1.05f) * Mathf.Sin(th);
-                    if (Hidden(px, py, sp.own))
+                    if (HiddenSkirt(px, py, sp.own, enterT))
                         continue;
                     Vector3 pos = origin + f * px + s * py + up * (sp.wl + 0.05f);
                     float uphill = Mathf.Max(0, -downhill), down = Mathf.Max(0, downhill);
-                    float ang = Mathf.Clamp(slope * (1 - 0.55f * down) * (1 + 0.35f * uphill) * Random.Range(0.75f, 1.25f), 2f, 65f) * Mathf.Deg2Rad;
-                    float v0 = vs * Random.Range(0.55f, 1f) * (1 + 0.6f * uphill) * (1 - 0.2f * down) * lump
+                    // (low over the water, 0.65 of its slope: at the full slope the near side of its cone, seen from above, hid the clear ring)
+                    // (and some of it higher: seen from the side the sheet is a low cloud a quarter of the body's width deep, not
+                    // a film on the water (Orion's drop tests); the high side's thrown up steeply)
+                    float ang = Mathf.Clamp(0.65f * slope * (1 - 0.55f * down) * (1 + 0.9f * uphill) * Random.Range(0.75f, 1.25f)
+                                            + 14f * Random.value * Random.value * (0.35f + uphill), 2f, 60f) * Mathf.Deg2Rad;
+                    // (two fifths of it the slower thick of the sheet behind its tip: the white still standing 1-2 D out when
+                    // the tip has flown on, hanging on longer)
+                    bool thick = Random.value < 0.4f;
+                    float v0 = vs * (thick ? Random.Range(0.15f, 0.55f) : Random.Range(0.55f, 1f)) * (1 + 0.45f * uphill) * (1 - 0.7f * down) * (1 - 0.15f * (lean - Mathf.Abs(downhill))) * lump
                                * Mathf.Clamp(1 + 0.6f * Vector3.Dot(outward, Vector3.ProjectOnPlane(sp.vel, up)) / Mathf.Max(sp.eU, 1f), 0.5f, 1.6f);
                     Vector3 pv = outward * v0 * Mathf.Cos(ang) + up * v0 * Mathf.Sin(ang) + sp.vel * 0.5f;
                     // (its sheet slowed by the air, lasting 0.5-1.1 s; the drops torn off it flying free, briefly)
                     float life = Random.Range(0.15f, 0.45f);
-                    skirt.Emit(new ParticleSystem.EmitParams
+                    WakeStats.Emit(skirt, new ParticleSystem.EmitParams
                     {
-                        position = pos, velocity = pv, startSize = Random.Range(0.5f, 1.05f) * (1 + 0.8f * uphill) * big,
-                        startLifetime = Random.Range(0.8f, 1.6f) * (1 + 0.3f * uphill), startColor = Tint(light, Mathf.Min(1, cfg.sheetAlpha * 2.9f)),
+                        position = pos, velocity = pv, startSize = (thick ? Random.Range(0.35f, 0.8f) : Random.Range(0.3f, 0.65f)) * (1 + 0.2f * uphill) * big,
+                        startLifetime = (thick ? Random.Range(1.0f, 1.8f) : Random.Range(0.6f, 1.2f)) * (1 + 0.3f * uphill), startColor = Tint(light, Mathf.Min(1, cfg.sheetAlpha * 2.9f) * opacity),
+                        axisOfRotation = new Vector3(Mathf.Min(1, cfg.sheetAlpha * 2.9f) * opacity, 0, 0),   // (its alpha outside the clear zones: Skirt)
                         rotation = Random.value * 360f,
                     }, 1);
                     emittedSpray++;
-                    if (Random.value < 0.35f)
-                        EmitSpray(pos, pv * Random.Range(0.8f, 1.1f), Random.Range(0.12f, 0.25f) * big, life * 1.2f, Tint(light, 0.85f));
-                    // (a haze of fine spray carried out with the sheet: Apollo's white glowing soft at its edge)
-                    if (haze != null && cfg.hazeAlpha > 0 && Random.value < 0.2f)
+                    // (the drops flying on ahead of its edge, as long as the sheet's tip lasts: its rim seen as drops)
+                    // (of many sizes, a few of them big clumps; thrown wider and higher than the sheet, each until it falls back)
+                    if (Random.value < 0.5f)
                     {
-                        haze.Emit(new ParticleSystem.EmitParams
+                        float dr = Random.value, da = ang + Random.Range(0f, 0.45f) * (0.4f + uphill), dv = v0 * Random.Range(0.7f, 1.3f);
+                        Vector3 dpv = outward * dv * Mathf.Cos(da) + up * dv * Mathf.Sin(da) + sp.vel * 0.5f + Random.insideUnitSphere * 1.5f;
+                        EmitSpray(pos, dpv, (0.1f + 0.5f * dr * dr * dr) * big, Mathf.Min(2 * dv * Mathf.Sin(da) / 9.81f + 0.3f, 2.5f) * Random.Range(0.8f, 1f),
+                                  Tint(light, 0.85f));
+                    }
+                    // (the sheet as a cloud of drops: clouds of them (the hull slam's) flying with it, slowed by the air, billowing,
+                    // falling back; grainy where the streaks are smooth)
+                    // (a flat hit's sheet nearly all mist: twice the clouds)
+                    for (int c = Random.value < flatK ? 2 : 1; c > 0; c--)
+                    if (splashCloud != null && Random.value < 0.8f * (1 + 0.25f * uphill))
+                    {
+                        float ca = ang + Random.Range(0f, 0.3f) * (0.35f + uphill);
+                        float cv = v0 * Random.Range(0.45f, 1f) * Mathf.Lerp(1f, 2.4f, flatK);
+                        WakeStats.Emit(splashCloud, new ParticleSystem.EmitParams
+                        {
+                            position = pos, velocity = outward * cv * Mathf.Cos(ca) + up * (cv * Mathf.Sin(ca) + Random.Range(0f, 2.5f) * (0.35f + uphill)) + sp.vel * 0.5f,
+                            startSize = Random.Range(0.7f, 1.9f) * (1 + 0.9f * uphill) * big, startLifetime = Random.Range(1.3f, 3.2f) * Mathf.Lerp(0.6f, 1f, opacity),
+                            startColor = Tint(light, Mathf.Min(1, cfg.sheetAlpha * 1.9f) * opacity), rotation = Random.value * 360f,
+                            axisOfRotation = new Vector3(Mathf.Min(1, cfg.sheetAlpha * 1.9f) * opacity, 0, 0),
+                        }, 1);
+                        emittedSpray++;
+                    }
+                    // (and the mist it turns to: soft puffs rising off the sheet where it slows, hanging for seconds over the
+                    // whole splash, as high as the body is wide)
+                    if (splashMist != null && Random.value < 0.17f * (1 + flatK))
+                    {
+                        WakeStats.Emit(splashMist, new ParticleSystem.EmitParams
+                        {
+                            position = pos + up * 0.8f,
+                            velocity = outward * v0 * Mathf.Cos(ang) * Random.Range(0.25f, 0.9f) * Mathf.Lerp(1f, 2f, flatK) + up * Random.Range(0.3f, 2.2f) * (0.4f + 2f * uphill),
+                            startSize = Random.Range(1.5f, 3f) * big,
+                            startLifetime = Random.Range(3f, 6f),
+                            rotation = Random.value * 360f,
+                            startColor = Tint(light, SplashMistAlpha * Mathf.Lerp(0.5f, 1f, opacity)),
+                            axisOfRotation = new Vector3(SplashMistAlpha * Mathf.Lerp(0.5f, 1f, opacity), 0, 0),
+                        }, 1);
+                        emittedMist++;
+                    }
+                    // (the mist the sheet leaves hanging low over the water where it slows: Apollo's white standing a second
+                    // and more, soft at its edge, when the sheet's streaks have flown apart)
+                    if (Random.value < 0.12f)
+                    {
+                        WakeStats.Emit(mist, new ParticleSystem.EmitParams
+                        {
+                            position = pos + up * 0.7f,   // (clear of the water: a puff dipping into it is cut along the surface)
+                            velocity = outward * v0 * Mathf.Cos(ang) * Random.Range(0.25f, 0.5f) + up * Random.Range(0.2f, 0.9f),
+                            startSize = Random.Range(1.2f, 2.2f) * big,
+                            startLifetime = Random.Range(1.4f, 2.4f),
+                            startColor = Tint(light, cfg.mistAlpha),
+                        }, 1);
+                        emittedMist++;
+                    }
+                    // (a haze of fine spray carried out with the sheet: Apollo's white glowing soft at its edge)
+                    // (by the ring's edge, ~3 puffs a frame for a 4 m capsule, not a share of the drops: 20% of them, additive and
+                    // overlapping, whited the ring out)
+                    if (haze != null && cfg.hazeAlpha > 0 && Random.value < Mathf.Min(0.2f, 0.25f * Mathf.PI * sp.eD / Mathf.Max(ns, 1)))
+                    {
+                        WakeStats.Emit(haze, new ParticleSystem.EmitParams
                         {
                             position = pos + outward * 0.5f,
                             velocity = pv * 0.6f,
@@ -1919,7 +2319,7 @@ namespace WaterWakes
                     // middle at most (Apollo's 6-8 D across by 1.5 s), each patch laid when the sheet gets there (its
                     // drag-slowed flight: t = (e^(k x) - 1) / (k v)), so the white grows out; none within ~0.4 D of the
                     // waterline (Apollo's ring of dark open water round the capsule); lasting: bright ~1 s, gone in several)
-                    if (Random.value < 0.3f && lateFoam.Count < 6000)
+                    if (Random.value < 0.2f && lateFoam.Count < 6000)
                     {
                         float vh = Mathf.Max(1, v0 * Mathf.Cos(ang));
                         float inner = (1.1f + 0.7f * uphill) * sp.eD;
@@ -1937,6 +2337,11 @@ namespace WaterWakes
                 }
             }
 
+            if (sp.hull && !sp.outOf)
+                EmitHullSlam(sp, origin, f, s, up, dt, light, cfg);
+            else if (sp.hull)
+                EmitHullShed(sp, origin, f, s, up, dt, light, cfg);
+
             // mist: a cloud hanging over the splash
             int m = Mathf.Min(Count(dt * rate * (sp.entry ? 0.012f : 0.04f)), 25);
             for (int i = 0; i < m; i++)
@@ -1952,8 +2357,230 @@ namespace WaterWakes
                     startLifetime = cfg.mistLife * Random.Range(0.8f, 1.4f),
                     startColor = Tint(light, cfg.mistAlpha),
                 };
-                mist.Emit(ep, 1);
+                WakeStats.Emit(mist, ep, 1);
                 emittedMist++;
+            }
+        }
+
+        // a hull slamming down by its own motion (a surfacing sub's bow falling back): as a flat-bottomed body's slam, the
+        // water it meets is thrown off sideways in sheets as fast as twice its waterline spreads (Wagner's jet), here the
+        // line sweeping along the falling hull (~the bow's speed / tan(pitch): ~15 m/s for a sub's bow at 7 m/s, 25 deg),
+        // at least the speed it goes in, capped at 5 x it and 40 m/s; as much as wetted area it gains. Off both sides of
+        // the stretch going in fastest, mostly low, a few up to the full speed (US Navy emergency blow footage: a white
+        // wall the length of the hull, higher than its beam, the spray hanging seconds after); foam where it lands; a
+        // haze over it by the edge's length (not by the drops: overlapping additive puffs went white)
+        private void EmitSlamSpray(Vector3 pos, Vector3 vel, float size, float life, float light, WakeSettings cfg)
+        {
+            WakeStats.Emit(slamSpray, new ParticleSystem.EmitParams
+            {
+                position = pos, velocity = vel, startSize = size, startLifetime = life,
+                // (each one see-through enough that piled up the drops and gaps still show inside: at the skirt's 2.9 x
+                // they piled into a flat white)
+                startColor = Tint(light, Mathf.Min(1, cfg.sheetAlpha * 1.9f)), rotation = Random.value * 360f,
+            }, 1);
+            emittedSpray++;
+        }
+
+        // clouds of droplets (2 x 2 variants), a height field for the Spray shader's erosion: R the height (a faint haze
+        // low over the cloud's body, each drop a bump well above it, higher where the cloud is denser), so it erodes haze
+        // first, leaving separate drops, then the smaller, outer drops; G each drop's shade (some catch the light more)
+        private static Texture2D DropCloudTexture()
+        {
+            const int T = 128;
+            var tex = new Texture2D(2 * T, 2 * T, TextureFormat.RGBA32, true, true) { wrapMode = TextureWrapMode.Clamp, name = "WaterWakes drop cloud" };
+            var h = new float[4 * T * T];
+            var g = new float[4 * T * T];
+            var rnd = new System.Random(9173);
+            for (int tile = 0; tile < 4; tile++)
+            {
+                int ox = (tile & 1) * T, oy = (tile >> 1) * T;
+                float seed = 5.3f + tile * 17.9f;
+                // the cloud's body: round, lumpy
+                float Env(float u, float w)
+                {
+                    float r = Mathf.Sqrt(u * u * 0.85f + w * w * 1.15f) * 2;
+                    float lump = Mathf.PerlinNoise(seed + u * 4, seed + w * 4);
+                    return Mathf.Pow(Mathf.Clamp01(1 - r * r), 0.8f) * (0.55f + 0.45f * lump);
+                }
+                for (int j = 0; j < T; j++)
+                    for (int i = 0; i < T; i++)
+                    {
+                        float u = (i + 0.5f) / T - 0.5f, w = (j + 0.5f) / T - 0.5f;
+                        int k = (oy + j) * 2 * T + ox + i;
+                        h[k] = 0.45f * Env(u, w) * (0.7f + 0.3f * Mathf.PerlinNoise(seed * 3 + u * 16, seed * 3 + w * 16));
+                        g[k] = 0.7f;
+                    }
+                // the drops: more where the body is denser, a few big, many small
+                for (int n = 0; n < 1400; n++)
+                {
+                    float u = (float)rnd.NextDouble() - 0.5f, w = (float)rnd.NextDouble() - 0.5f;
+                    float e = Env(u, w);
+                    if (rnd.NextDouble() > e * 1.3f)
+                        continue;
+                    double q = rnd.NextDouble();
+                    float rad = 0.8f + 3.2f * (float)(q * q * q);
+                    float top = 0.45f + 0.55f * Mathf.Clamp01(e * (0.6f + 0.6f * (float)rnd.NextDouble()) + 0.1f * rad / 4);
+                    float shade = 0.5f + 0.5f * (float)rnd.NextDouble();
+                    float cx = (u + 0.5f) * T, cy = (w + 0.5f) * T;
+                    for (int j = Mathf.Max(0, (int)(cy - rad - 1)); j <= Mathf.Min(T - 1, (int)(cy + rad + 1)); j++)
+                        for (int i = Mathf.Max(0, (int)(cx - rad - 1)); i <= Mathf.Min(T - 1, (int)(cx + rad + 1)); i++)
+                        {
+                            float dx = i + 0.5f - cx, dy = j + 0.5f - cy;
+                            float d = Mathf.Sqrt(dx * dx + dy * dy) / rad;
+                            if (d >= 1)
+                                continue;
+                            int k = (oy + j) * 2 * T + ox + i;
+                            float v = top * Mathf.Sqrt(1 - d * d);
+                            if (v > h[k])
+                            {
+                                h[k] = v;
+                                g[k] = shade;
+                            }
+                        }
+                }
+            }
+            var px = new Color32[4 * T * T];
+            for (int k = 0; k < px.Length; k++)
+                px[k] = new Color32((byte)(Mathf.Clamp01(h[k]) * 255), (byte)(Mathf.Clamp01(g[k]) * 255), 255, 255);
+            tex.SetPixels32(px);
+            tex.Apply(true, true);
+            return tex;
+        }
+
+        private void EmitHullSlam(Splash sp, Vector3 origin, Vector3 f, Vector3 s, Vector3 up, float dt, float light, WakeSettings cfg)
+        {
+            if (cfg.skirtAmount <= 0)
+                return;
+            float U = Mathf.Min(sp.hullV, cfg.splashMaxSpeed);
+            // (its waterline's spread: measured (from the colliders' boxes: coarse, ~5 m/s for the sub), or from its pitch: a
+            // hull at pitch th going in at U sweeps its waterline along it at U / tan th (~15 m/s, the sub's bow at 25 deg))
+            float spread = Mathf.Max(0, Mathf.Max(Mathf.Max(sp.growL, 0.5f * sp.growB), U / Mathf.Max(sp.hullTan, 0.2f)));
+            float vs = Mathf.Min(Mathf.Clamp(2f * spread * cfg.skirtSpeed, U, 5f * U), 40f);
+            float grow = spread * sp.B + Mathf.Max(0, sp.growB) * sp.L + 0.2f * U * sp.L;   // (m2/s newly wet; and the sides pushed out)
+            float strong = Mathf.Clamp01((U - cfg.hullSlamSpeed) / 4f + 0.25f);
+            int ns = Mathf.Min(Count(dt * grow * 7f * strong * cfg.skirtAmount * cfg.intensity), 280);
+            float big = Mathf.Clamp(Mathf.Sqrt(sp.B) * 0.5f, 0.8f, 2.5f);
+            if (SplashDebug || cfg.debugLog)
+                Debug.Log($"[WaterWakes] hull slam: U {U:F1} m/s, waterline growing {sp.growL:F1} / {sp.growB:F1} m/s, sheet {vs:F1} m/s, L {sp.L:F1} B {sp.B:F1}, {ns} blobs");
+            // (the air and water trapped under the falling hull escape ahead of the closing contact line: forward and out
+            // to the sides, strongest at the front of the stretch, where the line is sweeping; a share as a jet straight
+            // out ahead of the nose, fanning)
+            Vector3 fwd = f * (sp.hullFwd != 0 ? sp.hullFwd : 1);
+            float frontX = sp.fc + 0.5f * sp.L * (sp.hullFwd != 0 ? sp.hullFwd : 1);
+            for (int i = 0; i < ns; i++)
+            {
+                float side = Random.value < 0.5f ? 1 : -1;
+                bool jet = Random.value < 0.45f;
+                // (all from where its bottom meets the water (the stretch's front, 0.2 beams back from its end): the flanks'
+                // sheets off its sides there and just behind (the contact favoured), the plume squeezed out from under its keel
+                // right at it, out ahead)
+                float fs = sp.hullFwd != 0 ? sp.hullFwd : 1;
+                float contactX = frontX - fs * 0.2f * sp.B;
+                float along = jet ? 0 : Random.value * Random.value;
+                float px = jet ? contactX + fs * Random.Range(-0.15f, 0.2f) * sp.B : contactX - fs * along * 1.2f * sp.B;
+                float py = jet ? sp.sc + side * 0.5f * sp.B * Random.Range(0f, 0.35f) : sp.sc + side * 0.5f * sp.B * Random.Range(0.8f, 1.05f);
+                if (Hidden(px, py, sp.own))
+                    continue;
+                // (the plume out ahead, fanning a little; the flanks' thrown off sideways, barely forward: leaning well forward
+                // near the bow they read as side jets aimed ahead)
+                float ahead = jet ? 1 : Mathf.Lerp(0.4f, 0.05f, along) * Random.Range(0.6f, 1.2f);
+                Vector3 outward = (s * side * (jet ? Random.Range(0f, 0.4f) : 1) + fwd * ahead).normalized;
+                Vector3 pos = origin + f * px + s * py + up * (sp.wl + 0.05f);
+                float u = Random.value;
+                // (little of the hull's own way carried: the air soon stops it)
+                // (the plume out ahead flatter and faster, a sheet driven out by the water and air squeezed from under the
+                // bow; the flanks' mostly low, a few up to the full speed)
+                float v0 = jet ? vs * Random.Range(0.45f, 1f) : vs * (0.2f + 0.8f * u * u * u) * Random.Range(0.85f, 1.1f);
+                float ang = (jet ? Random.Range(35f, 70f) : Random.Range(12f, 45f)) * Mathf.Deg2Rad;   // (from the vertical: the plume low along the water, out ahead)
+                Vector3 pv = up * v0 * Mathf.Cos(ang) + outward * v0 * Mathf.Sin(ang) + sp.vel * 0.15f + Random.insideUnitSphere * 0.6f;
+                float flight = 2 * Mathf.Max(0, Vector3.Dot(pv, up)) / 9.81f;
+                // (the plume as round sheet blobs, not the skirt's streaks: those are stretched along their flight, and seen
+                // end on, flying at the camera ahead of the bow, they all but vanished: a notch in the front view)
+                float life = Mathf.Clamp(flight * 0.85f + 0.4f, 0.8f, 5f);
+                if (slamSpray != null)
+                    EmitSlamSpray(pos, pv, (jet ? Random.Range(1.2f, 2.6f) : Random.Range(0.8f, 1.8f)) * big * (1 + 0.04f * v0), life, light, cfg);
+                else if (jet)
+                    EmitSheet(pos, pv, Random.Range(1.2f, 2.6f) * big * (1 + 0.04f * v0), life, Tint(light, Mathf.Min(1, cfg.sheetAlpha * 2.2f)));
+                else
+                    WakeStats.Emit(skirt, new ParticleSystem.EmitParams
+                    {
+                        position = pos, velocity = pv, startSize = Random.Range(0.7f, 1.6f) * big * (1 + 0.04f * v0),
+                        startLifetime = life, startColor = Tint(light, Mathf.Min(1, cfg.sheetAlpha * 2.9f)),
+                        rotation = Random.value * 360f,
+                    }, 1);
+                emittedSpray++;
+                if (Random.value < 0.4f)
+                    EmitSpray(pos, pv * Random.Range(0.8f, 1.15f), Random.Range(0.15f, 0.35f) * big, flight + 0.3f, Tint(light, 0.85f));
+                // (the foam it leaves: where it comes down, drag shortening its reach; a white band along the hull)
+                if (Random.value < 0.25f && lateFoam.Count < 6000)
+                {
+                    float vh = Mathf.Max(0.5f, Vector3.Dot(pv, outward));
+                    float reach = Mathf.Min(Mathf.Log(1 + 0.08f * vh * Mathf.Max(flight, 0.3f) * 1.2f) / 0.08f, 3f * sp.B);
+                    lateFoam.Add(new LateFoam
+                    {
+                        at = Time.time + Mathf.Max(flight, 0.2f) * 0.7f,
+                        pos = pos + outward * reach - up * (sp.wl + 0.05f - cfg.foamLift), vel = outward * Random.Range(0.3f, 0.9f),
+                        size = Random.Range(3f, 5.5f) * big, life = cfg.foamLife * Mathf.Lerp(0.4f, 1.2f, Random.value),
+                        alpha = Mathf.Min(1, cfg.foamAlpha * Random.Range(0.6f, 1f)), light = light,
+                        aspect = Random.Range(1.2f, 2.2f), rot = SplashRot(up, outward) + Random.Range(-20f, 20f), up = up,
+                    });
+                }
+            }
+            // the haze over it: by the edge's length (both sides), not by the drops
+            if (haze != null && cfg.hazeAlpha > 0)
+            {
+                int nh = Mathf.Min(Count(dt * 2 * sp.L * 0.12f * strong * cfg.intensity), 6);   // (a third of it: more glowed into a flat white base under the drops)
+                for (int i = 0; i < nh; i++)
+                {
+                    float side = Random.value < 0.5f ? 1 : -1;
+                    float px = sp.fc + sp.L * (Random.value - 0.5f), py = sp.sc + side * 0.5f * sp.B;
+                    Vector3 outward = s * side;
+                    WakeStats.Emit(haze, new ParticleSystem.EmitParams
+                    {
+                        position = origin + f * px + s * py + up * (sp.wl + Random.Range(0.5f, 3f)) + outward * Random.Range(0.5f, 2f),
+                        velocity = up * vs * Random.Range(0.15f, 0.45f) + outward * vs * Random.Range(0.1f, 0.3f) + sp.vel * 0.15f,
+                        startSize = Random.Range(4f, 8f) * big, startLifetime = Random.Range(2f, 3.5f), rotation = Random.value * 360f,
+                        startColor = Tint(light, cfg.hazeAlpha),
+                    }, 1);
+                    emittedMist++;
+                }
+            }
+        }
+
+        // a hull rising fast out of the water (a surfacing sub's bow breaking out): the water it lifts on its upper side
+        // pouring off it in white sheets down both flanks (the emergency blow footage: cascades off the bow and the sail as
+        // they rise, the white running back down into the sea). Thrown up with the hull's own speed there, spilling
+        // outward, falling back; as much as it is fast and long, along the stretch rising fastest
+        private void EmitHullShed(Splash sp, Vector3 origin, Vector3 f, Vector3 s, Vector3 up, float dt, float light, WakeSettings cfg)
+        {
+            if (cfg.breachSize <= 0)
+                return;
+            float U = Mathf.Min(sp.hullV, 20f);
+            float strong = Mathf.Clamp01((U - cfg.hullSlamSpeed) / 4f + 0.25f);
+            int ns = Mathf.Min(Count(dt * U * sp.L * 2.2f * strong * cfg.breachSize * cfg.intensity), 200);
+            float big = Mathf.Clamp(Mathf.Sqrt(sp.B) * 0.5f, 0.8f, 2.5f);
+            for (int i = 0; i < ns; i++)
+            {
+                float side = Random.value < 0.5f ? 1 : -1;
+                float px = sp.fc + sp.L * (Random.value - 0.5f), py = sp.sc + side * 0.5f * sp.B * Random.Range(0.6f, 1.0f);
+                if (Hidden(px, py, sp.own))
+                    continue;
+                Vector3 outward = (s * side + f * Random.Range(-0.2f, 0.2f)).normalized;
+                Vector3 pos = origin + f * px + s * py + up * (sp.wl + Random.Range(0.1f, 0.25f) * sp.B);
+                Vector3 pv = up * U * Random.Range(0.45f, 1.05f) + outward * Random.Range(1f, 4f) + sp.vel * 0.8f + Random.insideUnitSphere * 0.5f;
+                float flight = 2 * Mathf.Max(0, Vector3.Dot(pv, up)) / 9.81f + 0.3f;
+                if (slamSpray != null)
+                    EmitSlamSpray(pos, pv, Random.Range(0.8f, 1.8f) * big, Mathf.Clamp(flight, 0.6f, 4f), light, cfg);
+                else
+                    WakeStats.Emit(skirt, new ParticleSystem.EmitParams
+                    {
+                        position = pos, velocity = pv, startSize = Random.Range(0.8f, 1.8f) * big,
+                        startLifetime = Mathf.Clamp(flight, 0.6f, 4f), startColor = Tint(light, Mathf.Min(1, cfg.sheetAlpha * 2.6f)),
+                        rotation = Random.value * 360f,
+                    }, 1);
+                emittedSpray++;
+                if (Random.value < 0.3f)
+                    EmitSpray(pos, pv * Random.Range(0.9f, 1.1f), Random.Range(0.12f, 0.3f) * big, flight, Tint(light, 0.8f));
             }
         }
 
@@ -2089,6 +2716,10 @@ namespace WaterWakes
         // a part's entry into the water: dry (under 2% of its volume wet) for 0.3 s, then wet. Over its first 0.1 s its
         // speed into the water (normal to it) and its waterline's size are taken, and from them when its crown domes over
         // (surface seal: t U / D ~ 5.75 past Fr_D ~ 11, Marston 2012, the deep seal's time) and its Impact (the jet)
+        // the bottom's slope to the water (tan) from which a slam is wholly one-sided: the capsule hanging 27.5 deg off
+        // upright under its parachutes crosses the water at 0.30 by this measure (half the 12 deg one's speed), 12 deg 0.20
+        private const float SweepFullSlope = 0.3f;
+
         private void Entry(Wetting wt, Part p, CelestialBody body, Vector3 origin, Vector3 f, Vector3 s, Vector3 up, float frac, List<Vector2> line,
                            float dt, WakeSettings cfg)
         {
@@ -2108,6 +2739,7 @@ namespace WaterWakes
                 wt.lbSkirt = 0;
                 wt.spreadMax = 0;
                 wt.flat = 0;
+                wt.sweep = Vector2.zero;
                 wt.sealAt = float.MaxValue;
                 wt.alt0 = FlightGlobals.getAltitudeAtPos((Vector3d)p.transform.position, body);
                 float x = 0, y = 0;
@@ -2144,7 +2776,7 @@ namespace WaterWakes
             }
             // (the spray skirt: the waterline's growth over the first 0.25 s, whether or not the entry is done measuring)
             wt.skirtArea = wt.skirtSpread = 0;
-            if (wt.enterT >= 0 && Time.time - wt.enterT < 0.25f && line.Count > 1)
+            if (wt.enterT >= 0 && Time.time - wt.enterT < SkirtWindow && line.Count > 1)
             {
                 float a0 = float.MaxValue, a1 = float.MinValue, b0 = float.MaxValue, b1 = float.MinValue;
                 foreach (Vector2 q in line)
@@ -2158,9 +2790,14 @@ namespace WaterWakes
                 if (lb > wt.lbSkirt)
                 {
                     wt.skirtArea = lb - wt.lbSkirt;
-                    wt.skirtSpread = (Mathf.Sqrt(lb) - Mathf.Sqrt(wt.lbSkirt)) * 0.5f / Mathf.Max(dt, 1e-3f);
+                    // (over a physics step at least: the hull moves only on physics steps, so at a frame rate above them a
+                    // step's growth shows in one frame, and over the frame's dt it read up to 7x fast at 165 fps: a wedge
+                    // threw a skirt on a fast machine and none on a slow one)
+                    wt.skirtSpread = (Mathf.Sqrt(lb) - Mathf.Sqrt(wt.lbSkirt)) * 0.5f / Mathf.Max(dt, TimeWarp.fixedDeltaTime, 1e-3f);
                     wt.lbSkirt = lb;
                     wt.spreadMax = Mathf.Max(wt.spreadMax, wt.skirtSpread);
+                    // (its sweep: known from its first frame in, from where it touched and how fast the line crosses)
+                    wt.sweep = -wt.tilt * Mathf.Clamp01(wt.U / Mathf.Max(2 * wt.spreadMax, 0.1f) / SweepFullSlope);
                     // (flat: its submerged vertices' depths alike across their spread, a few percent of it at most; a flat
                     // face 5 deg off square gets 0.17, a ball or a heat shield far more)
                     float half = 0.25f * ((subF1 - subF0) + (subS1 - subS0));
@@ -2201,7 +2838,8 @@ namespace WaterWakes
             if (impacts.Count > 32)
                 impacts.RemoveAt(0);
             float heavy = Mathf.Clamp(Mathf.Sqrt((p.mass + (float)p.GetResourceMass()) * 1000f / Mathf.Max(1f, 1000f * D * D * D)), 0.3f, 1.6f);   // (its mass over a D cube of water's)
-            rings.Add(new Ring { body = body, lat = wt.lat, lon = wt.lon, D = D, U = U, t = Time.time - wt.enterT, dur = 2.5f * Mathf.Sqrt(D / 2.5f), amp = heavy });
+            rings.Add(new Ring { body = body, lat = wt.lat, lon = wt.lon, D = D, U = U, t = Time.time - wt.enterT, dur = 2.5f * Mathf.Sqrt(D / 2.5f), amp = heavy,
+                                 band = Mathf.Clamp01((wt.spreadMax / Mathf.Max(U, 0.1f) - 1) / 0.5f) * Mathf.Clamp01((U - 4) / 4) });
             if (rings.Count > 32)
                 rings.RemoveAt(0);
         }
@@ -2342,6 +2980,26 @@ namespace WaterWakes
                 float whitecap = Mathf.Clamp01((drdt - cfg.ringWhitecapSpeed) / 3f) * Mathf.Clamp01(rpA * 2 * Mathf.PI / rpL / 0.15f) * fade;
                 if (rpA > 0.005f)
                     RippleSources.Add(new RippleSource { pos = site, radius = r, amp = rpA, wavelength = rpL, length = 3f * rpL, foam = whitecap });
+                // (a blunt hard hit's whitewater: a band of churned foam rolling out with the ring's crest, left thinning
+                // behind it (Orion's drop tests: a white band out to 2-3 widths over turquoise aerated water))
+                if (rg.band > 0.05f && fade > 0)
+                {
+                    Vector3 b1 = SplashRef(up), b2 = Vector3.Cross(up, b1);
+                    float blight = Light(site, up, cfg), bbig = Mathf.Clamp(Mathf.Sqrt(rg.D / 2), 0.7f, 3f);
+                    int nb = Mathf.Min(Count(dt * 2 * Mathf.PI * r * 5f * rg.band * fade * Mathf.Min(rg.amp, 1) * cfg.intensity), 60);
+                    if (nb > 0 && splashFoam != null)
+                        splashFoam.transform.rotation = Quaternion.LookRotation(up, b1);
+                    for (int j = 0; j < nb; j++)
+                    {
+                        float th = Random.value * 2 * Mathf.PI;
+                        Vector3 radial = b1 * Mathf.Cos(th) + b2 * Mathf.Sin(th);
+                        Vector3 pos = site + radial * (r + Random.Range(-0.3f, 0.15f) * rg.D) + up * cfg.foamLift;
+                        if (holes.Count > 0 && HoleFactor(pos, 1.3f, 1.9f) < 0.5f)
+                            continue;
+                        EmitFoam(pos, radial * drdt * 0.7f, Random.Range(1.3f, 2.4f) * bbig, Random.Range(1.8f, 3.6f), Mathf.Min(1, cfg.foamAlpha * 1.3f), blight,
+                                 1.8f, SplashRot(up, Vector3.Cross(up, radial)) + Random.Range(-20f, 20f), true);
+                    }
+                }
                 if (cfg.ringWaves <= 0 || whitecap <= 0.01f)
                     continue;
                 Vector3 e1 = Vector3.Cross(up, Mathf.Abs(up.y) < 0.9f ? Vector3.up : Vector3.right).normalized, e2 = Vector3.Cross(up, e1);
@@ -2433,6 +3091,7 @@ namespace WaterWakes
         {
             var go = new GameObject(name);
             var ps = go.AddComponent<ParticleSystem>();
+            WakeStats.Register(ps, name);
             ps.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
             var main = ps.main;
             main.simulationSpace = ParticleSystemSimulationSpace.World;
@@ -2457,10 +3116,12 @@ namespace WaterWakes
             r.receiveShadows = false;
             if (flatOnWater)
             {
-                // quads lying on the water: Local alignment, the frame's Z kept along the local vertical
+                // quads lying on the water, each turned as it was laid (World alignment, FlatRotation): with Local
+                // alignment every patch alive turned with the system's frame, which follows each craft's flow every
+                // frame, so round a slow or drifting hull (its flow's direction wandering) all the foam wobbled
                 r.renderMode = ParticleSystemRenderMode.Mesh;
                 r.mesh = Quad();
-                r.alignment = ParticleSystemRenderSpace.Local;
+                r.alignment = ParticleSystemRenderSpace.World;
             }
             else
             {
@@ -2482,6 +3143,10 @@ namespace WaterWakes
             col.color = g;
         }
 
+        // a flat patch's world rotation (Euler degrees, as EmitParams.rotation3D takes it) when laid: its frame now (Z the
+        // local vertical, Y the flow) turned deg about its Z
+        private static Vector3 FlatRotation(Transform frame, float deg) => (frame.rotation * Quaternion.Euler(0, 0, deg)).eulerAngles;
+
         private static Shader FindShader(params string[] names)
         {
             foreach (string n in names)
@@ -2493,8 +3158,34 @@ namespace WaterWakes
             return null;
         }
 
+        // Scatterer's forward ocean (ForwardOceanHook) writes the camera's depth buffer, which would cut the puffs hard
+        // along the waves: there they get WaterWakes/SoftParticle (the same look) testing depth by hand (WakeOcean.cginc)
+        private static bool OverForwardOcean => ForwardOceanHook.Patched && ForwardOceanHook.Mat != null;
+
+        internal static void TestDepthByHand(Material m)
+        {
+            if (m != null && OverForwardOcean && m.HasProperty("_WWZTest"))
+            {
+                m.SetFloat("_WWZTest", (float)CompareFunction.Always);
+                m.SetFloat("_WWManualZ", 1);
+            }
+        }
+
         private static Material Mat(Shader sh, Texture2D tex, bool soft = false)
         {
+            Shader sp = soft && OverForwardOcean ? WakeShaders.Get("WaterWakes/SoftParticle") : null;
+            if (sp != null)
+            {
+                bool additive = sh.name.Contains("Additive");
+                var f = new Material(sp) { mainTexture = tex };
+                f.SetColor("_TintColor", new Color(0.5f, 0.5f, 0.5f, 0.5f));
+                f.SetFloat("_SrcBlend", (float)BlendMode.SrcAlpha);
+                f.SetFloat("_DstBlend", (float)(additive ? BlendMode.One : BlendMode.OneMinusSrcAlpha));
+                f.EnableKeyword("SOFTPARTICLES_ON");
+                f.SetFloat("_InvFade", 1f);
+                TestDepthByHand(f);
+                return f;
+            }
             var m = new Material(sh) { mainTexture = tex };
             if (m.HasProperty("_TintColor"))
                 m.SetColor("_TintColor", new Color(0.5f, 0.5f, 0.5f, 0.5f));
@@ -2763,12 +3454,16 @@ namespace WaterWakes
         }
 
         // the crisp sheet's blobs (WaterWakes/Spray): a 2x2 sheet, each R a height field (a round body, finely streaked
-        // along its length (u, the stretched billboard's), ragged at its edge) eroded by a rising threshold, G the streaks
+        // along its length (u, the stretched billboard's), ragged at its edge) eroded by a rising threshold, G the streaks.
+        // Drops over it and round it (bumps a little longer along u, as high as the body or higher): a fringe of them at
+        // its edge from the start, and what is left of it as it erodes, so the sheet reads as water breaking into drops
         private static Texture2D ErodeTexture()
         {
-            const int T = 128;
+            const int T = 256;
             var tex = new Texture2D(2 * T, 2 * T, TextureFormat.RGBA32, true, true) { wrapMode = TextureWrapMode.Clamp, name = "WaterWakes erode" };
             var px = new Color32[4 * T * T];
+            var hh = new float[T * T];
+            var gg = new float[T * T];
             for (int tile = 0; tile < 4; tile++)
             {
                 int ox = (tile & 1) * T, oy = (tile >> 1) * T;
@@ -2777,12 +3472,61 @@ namespace WaterWakes
                     for (int i = 0; i < T; i++)
                     {
                         float u = (i + 0.5f) / T - 0.5f, w = (j + 0.5f) / T - 0.5f;
-                        float r = Mathf.Sqrt(u * u * 0.8f + w * w * 1.25f) * 2;
-                        float st = Mathf.PerlinNoise(seed + w * 7, seed + u * 3f);
+                        float r = Mathf.Sqrt(u * u * 1.05f + w * w * 1.25f) * 2;   // (nothing of it at the tile's ends: at 0.8 its ends were cut square)
+                        float st = 0.6f * Mathf.PerlinNoise(seed + w * 7, seed + u * 3f) + 0.4f * Mathf.PerlinNoise(seed * 3 + w * 19, seed + u * 2.2f);
                         float fine = Mathf.PerlinNoise(seed * 2 + u * 9, seed * 2 + w * 9) - 0.5f;
                         float body = Mathf.Pow(Mathf.Clamp01(1 - r * r), 0.7f);
-                        float h = body * (0.5f + 0.5f * st) + 0.18f * fine * body;
-                        px[(oy + j) * 2 * T + ox + i] = new Color32((byte)(Mathf.Clamp01(h) * 255), (byte)(st * 255), 255, 255);
+                        hh[j * T + i] = body * (0.5f + 0.5f * st) + 0.18f * fine * body;
+                        gg[j * T + i] = st;
+                    }
+                for (int k = 0; k < 110; k++)
+                {
+                    Vector2 c = Random.insideUnitCircle * 0.47f;
+                    float rad = Mathf.Lerp(1.3f, 5f, Random.value * Random.value), top = Random.Range(0.3f, 0.8f), shade = Random.Range(0.5f, 1f);
+                    int ci = (int)((c.x + 0.5f) * T), cj = (int)((c.y + 0.5f) * T), reach = (int)(rad * 1.7f) + 1;
+                    for (int j = Mathf.Max(0, cj - reach); j <= Mathf.Min(T - 1, cj + reach); j++)
+                        for (int i = Mathf.Max(0, ci - reach); i <= Mathf.Min(T - 1, ci + reach); i++)
+                        {
+                            float du = (i - ci) / (rad * 1.6f), dw = (j - cj) / rad;
+                            float d = top * (1 - Smooth(0.4f, 1f, Mathf.Sqrt(du * du + dw * dw)));
+                            if (d > hh[j * T + i])
+                            {
+                                hh[j * T + i] = d;
+                                gg[j * T + i] = shade;
+                            }
+                        }
+                }
+                for (int j = 0; j < T; j++)
+                    for (int i = 0; i < T; i++)
+                        px[(oy + j) * 2 * T + ox + i] = new Color32((byte)(Mathf.Clamp01(hh[j * T + i]) * 255), (byte)(Mathf.Clamp01(gg[j * T + i]) * 255), 255, 255);
+            }
+            tex.SetPixels32(px);
+            tex.Apply(true, true);
+            return tex;
+        }
+
+        // a 2x2 sheet of mist puffs with some body to them: a soft round broken by fbm into billows and wisps, thin at
+        // its edge (the splash's mist: a plain soft round piled up into a featureless glow)
+        private static Texture2D PuffTexture()
+        {
+            const int T = 128;
+            var tex = new Texture2D(2 * T, 2 * T, TextureFormat.RGBA32, true) { wrapMode = TextureWrapMode.Clamp, name = "WaterWakes puff" };
+            var px = new Color32[4 * T * T];
+            for (int tile = 0; tile < 4; tile++)
+            {
+                int ox = (tile & 1) * T, oy = (tile >> 1) * T;
+                float seed = 11.3f + tile * 31.7f;
+                for (int j = 0; j < T; j++)
+                    for (int i = 0; i < T; i++)
+                    {
+                        float u = (i + 0.5f) / T - 0.5f, w = (j + 0.5f) / T - 0.5f;
+                        float n = 0, amp = 0.5f, fr = 3;
+                        for (int o = 0; o < 4; o++, amp *= 0.5f, fr *= 2.1f)
+                            n += amp * Mathf.PerlinNoise(seed + u * fr, seed * 1.7f + w * fr);
+                        float r = Mathf.Sqrt(u * u + w * w) * 2 + (n - 0.47f) * 0.5f;
+                        float a = Mathf.Pow(Mathf.Clamp01(1 - r * r), 1.3f) * Smooth(0.3f, 0.62f, n) ;
+                        byte g = (byte)(255 * (0.8f + 0.2f * Smooth(0.35f, 0.7f, n)));
+                        px[(oy + j) * 2 * T + ox + i] = new Color32(g, g, g, (byte)(Mathf.Clamp01(a) * 255));
                     }
             }
             tex.SetPixels32(px);

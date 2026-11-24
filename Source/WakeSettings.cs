@@ -39,7 +39,7 @@ namespace WaterWakes
         // mist
         [Persistent] public float mistMinSpeed = 5f;     // m/s
         [Persistent] public float mistRate = 110f;       // puffs per s per side per m of beam, 10 m/s over mistMinSpeed
-        [Persistent] public float hazeAlpha = 0.25f;     // a hard hit's glowing spray haze over its sheet (additive)
+        [Persistent] public float hazeAlpha = 0.15f;     // a hard hit's glowing spray haze over its sheet (additive; emitted by the splash edge's length)
         [Persistent] public float mistAlpha = 0.3f;      // at the water; less higher up
         [Persistent] public float mistFalloff = 0.8f;    // m: the mist's opacity falls by 1/e every this much height
         [Persistent] public float mistLife = 2.5f;       // s (mean)
@@ -60,6 +60,9 @@ namespace WaterWakes
         [Persistent] public float ringLife = 3f;          // the ripples last this many times as long as the breaking crest
         [Persistent] public float ringWavelength = 1f;    // x the ripples' wavelength (0.6 D + 0.15 x the ring's radius)
         [Persistent] public bool hideStockSplash = true; // stock's splash column (FXMonger) silenced: its sound kept, its particles off
+        [Persistent] public bool splashSounds = true;    // WaterWakes' splash sounds (WakeSounds): stock's boom for slams KSP doesn't hear, a breach's pour, the spray's hiss
+        [Persistent] public float splashVolume = 1f;    // x KSP's ship volume
+        [Persistent] public float hullSlamSpeed = 2.5f;  // m/s: a hull going in this fast by its own motion (its waterline's fastest point) slams, however deep
         [Persistent] public float submergedFade = 0.4f;  // m: a part wholly under water makes less wake the deeper its top, none from here
 
         // foam painted on Scatterer's waves (its ocean gbuffer)
@@ -75,9 +78,25 @@ namespace WaterWakes
         [Persistent] public int paintHook = 1;         // 0 BeforeImageEffectsOpaque, 1 Scatterer's ordered AfterForwardOpaque, 2 AfterForwardOpaque; -1 cycle (debug)
         [Persistent] public bool paintDebug = false;   // log depth diagnostics every 5 s
         [Persistent] public bool paintDebugToggle = false;
-        [Persistent] public float paintDebugMode = 0;  // 1: full foam on the left half of the screen; -1: foam wherever the ocean depth reads; 2: ours only; 3: Scatterer's only
+        [Persistent] public float paintDebugMode = 0;  // 1: full foam on the left half of the screen; -1: foam wherever the ocean depth reads; 2: ours only; 3: Scatterer's only; 4 (forward ocean): the foam's sun term over the left half; 5 (deferred): a coverage ramp, 0 to 1 up the left half
         [Persistent] public float debugCamDistance = 20f;   // the debug toggle's camera: m from the craft
         [Persistent] public float debugCamPitch = 20f;      // deg down
+        // Scatterer's forward ocean (0.0878, the CKAN release): our foam lit by the scene's sun and ambient, the wake
+        // waves as the light their slopes change (its own shader can't take them)
+        [Persistent] public float fwdFoamBright = 1f;      // x the foam's brightness
+        [Persistent] public float foamShade = 2.5f;        // x the waves' own slopes in our foam's lighting, either ocean (0: lit as if flat;
+                                                           // a light breeze's ~0.05 slopes alone change diffuse light by a few per cent)
+        [Persistent] public float fwdFoamSheen = 0.3f;     // the water's reflection showing on the (wet) foam
+        [Persistent] public float foamCover = 0.5f;        // deferred ocean (0.09+): our densest foam's coverage in its foam buffer
+                                                           // (1: as painted; its tone map turns ~0.5 already near white)
+        [Persistent] public float foamContrast = 1f;      // deferred ocean: our foam as white as it is dense (its tone map undone: soft edges,
+                                                          // texture inside dense foam); 0: eased as before (flat, hard edged)
+        [Persistent] public float foamLace = 1f;          // our surface foam laid out as tufts (FoamLace's warped noise: holes opening as
+                                                          // it thins), either ocean: 0 as painted, 1 full
+        [Persistent] public float foamLaceSize = 1f;      // x the size of its texture's tiles (6 m and 1.7 m)
+        [Persistent] public float foamBubbles = 1f;       // the bubbles under the foam: their turquoise glow through the water (0: none)
+        [Persistent] public float fwdWaveShade = 1f;       // x the waves' change to the sky's reflection
+        [Persistent] public float fwdGlint = 1f;           // x the sun glints off them
 
         // Kelvin wake waves drawn into Scatterer's ocean normals (its deferred ocean, 0.09+)
         [Persistent] public bool waves = true;

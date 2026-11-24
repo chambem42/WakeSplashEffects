@@ -47,6 +47,8 @@ namespace WaterWakes
         private RenderTexture nearMap;
         private Matrix4x4 nearMatrix = Matrix4x4.zero;
         private bool painting;
+        // (r: the foam on the surface; g: the bubbles under it)
+        private static RenderTextureFormat MapFormat => SystemInfo.SupportsRenderTextureFormat(RenderTextureFormat.RG16) ? RenderTextureFormat.RG16 : RenderTextureFormat.ARGB32;
 
         // hook modes: 0 BeforeImageEffectsOpaque; 1 AfterForwardOpaque through Scatterer's ordered list, after its ocean;
         // 2 AfterForwardOpaque added directly
@@ -72,9 +74,20 @@ namespace WaterWakes
             orderedRemove = ordered?.GetMethod("RemoveCommandBuffer", BindingFlags.Static | BindingFlags.Public, null, new[] { typeof(Camera), typeof(CommandBuffer) }, null);
             // the ocean gbuffer (oceanGbufferDepth / oceanGbufferFoam) came with the deferred ocean of Scatterer 0.09xx, which
             // also brought OrderedAfterForwardOpaqueCommandBuffer; earlier versions shade the ocean in one forward pass
+            // the forward ocean (0.0878 and before): ForwardOceanHook's pass, recorded into Scatterer's own command buffer,
+            // does the drawing; here only its maps and values each frame
+            forward = shader != null && renderingEnabled != null && orderedAdd == null && ForwardOceanHook.Patched && ForwardOceanHook.Mat != null;
+            if (forward)
+            {
+                mat = ForwardOceanHook.Mat;
+                Camera.onPreRender += PreRender;
+                Camera.onPostRender += PostRender;
+                Debug.Log("[WaterWakes] ocean foam painting on (Scatterer's forward ocean)");
+                return;
+            }
             if (shader == null || renderingEnabled == null || orderedAdd == null)
             {
-                Debug.Log($"[WaterWakes] ocean foam painting off (Scatterer ocean {(oceanCbType == null ? "not found" : renderingEnabled == null || orderedAdd == null ? "without the deferred ocean (needs 0.09xx)" : "found")})");
+                Debug.Log($"[WaterWakes] ocean foam painting off (Scatterer ocean {(oceanCbType == null ? "not found" : renderingEnabled == null ? "not as expected" : "forward, and its hook not placed (needs Harmony)")})");
                 painterOff = true;
                 enabled = Cfg.paintDebugToggle;   // (its debug screenshots still wanted)
                 return;
@@ -110,7 +123,9 @@ namespace WaterWakes
             if (diagA != null) diagA.Release();
             if (diagB != null) diagB.Release();
             if (haveA) lastA.Dispose();
-            if (mat != null) Destroy(mat);
+            if (forward && mat != null)
+                mat.SetFloat(FwdOnId, 0);   // (shared, and its pass still recorded in Scatterer's buffer)
+            else if (mat != null) Destroy(mat);
             if (mapCam != null) Destroy(mapCam.gameObject);
             if (map != null) map.Release();
             if (nearMap != null) nearMap.Release();
@@ -133,6 +148,137 @@ namespace WaterWakes
         }
 
         private bool painterOff;
+
+        // the forward ocean (ForwardOceanHook): lit by the scene's sun and ambient, which Scatterer tints for the atmosphere
+        private bool forward;
+        private static readonly int FwdOnId = Shader.PropertyToID("_WWFwdOn"), OceanOnId = Shader.PropertyToID("_WWOceanOn");
+        private Light sun;
+        private float nextSunSearch;
+
+        private void SetLight(Camera cam)
+        {
+            if ((sun == null || !sun.isActiveAndEnabled) && Time.unscaledTime > nextSunSearch)
+            {
+                nextSunSearch = Time.unscaledTime + 2;
+                sun = null;
+                foreach (Light l in FindObjectsOfType<Light>())
+                    if (l.type == LightType.Directional && l.isActiveAndEnabled && (sun == null || l.intensity > sun.intensity))
+                        sun = l;
+                if (sun != null)
+                    Debug.Log($"[WaterWakes] forward ocean lit by {sun.name}: colour {sun.color}, intensity {sun.intensity:F2}; ambient {RenderSettings.ambientLight}");
+            }
+            Color c = sun != null ? sun.color * sun.intensity : Color.white;
+            Vector3 toSun = sun != null ? -sun.transform.forward : Vector3.up;
+            mat.SetColor("_WWSunColor", c.linear);
+            mat.SetVector("_WWSunDir", toSun);
+            mat.SetColor("_WWAmbient", RenderSettings.ambientLight.linear);
+            mat.SetVector("_WWCamPos", cam.transform.position);
+            mat.SetFloat("_WWFoamBright", Cfg.fwdFoamBright);
+            mat.SetFloat("_WWWaveShade", Cfg.waves ? Cfg.fwdWaveShade : 0);
+            mat.SetFloat("_WWGlint", Cfg.fwdGlint);
+            mat.SetFloat("_WWFoamShade", Cfg.foamShade);
+            mat.SetFloat("_WWFoamSheen", Cfg.fwdFoamSheen);
+            mat.SetFloat("_WWFoamCover", Cfg.foamCover);
+            mat.SetFloat("_WWFoamContrast", Mathf.Clamp01(Cfg.foamContrast));
+            Texture lace = FoamLace.Texture;   // (null while it is being made: plain foam meanwhile)
+            mat.SetFloat("_WWLace", lace != null ? Cfg.foamLace : 0);
+            mat.SetFloat("_WWLaceSize", Mathf.Max(0.1f, Cfg.foamLaceSize));
+            mat.SetFloat("_WWBubbles", Cfg.foamBubbles);
+            if (lace != null)
+                mat.SetTexture("_WWLaceTex", lace);
+            if (forward)
+                CopyOceanWaves(cam);
+        }
+
+        // Scatterer's own waves, for the foam's lighting: its per-pixel normal, as the sea beside it is lit with. Read from
+        // its ocean node (OceanFFTgpu: the FFT slope and displacement maps, its grids; OceanNode: its ocean frame, z up
+        // beneath the camera, set by its OceanCameraUpdateHook in OnWillRenderObject, so this camera's by OnPreRender).
+        // (Not from its ocean material: Material.GetTexture / GetMatrix read only its shader's declared Properties)
+        private Type oceanNodeType, vec3d2Type;
+        private FieldInfo[] mapFields;
+        private FieldInfo gridField, chopField, uxField, uyField, uzField, ooField, offsetField, managerField, bodyField;
+        private FieldInfo vx, vy, vz;
+        private MethodInfo radiusMethod;
+        private Component oceanNode;
+        private float nextNodeSearch;
+        private static readonly int[] OurMaps =
+            { Shader.PropertyToID("_WWOMap1"), Shader.PropertyToID("_WWOMap2"), Shader.PropertyToID("_WWOMap3"), Shader.PropertyToID("_WWOMap4") };
+        private int wavesState = -1;
+
+        private Vector3d V3(object v) => v == null ? Vector3d.zero : new Vector3d((double)vx.GetValue(v), (double)vy.GetValue(v), (double)vz.GetValue(v));
+
+        private void CopyOceanWaves(Camera cam)
+        {
+            const BindingFlags F = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+            if (oceanNodeType == null)
+            {
+                Type T(string n) => AssemblyLoader.loadedAssemblies.Select(a => a.assembly.GetType(n)).FirstOrDefault(t => t != null);
+                oceanNodeType = T("Scatterer.OceanFFTgpu");
+                vec3d2Type = AssemblyLoader.loadedAssemblies.Select(a => a.assembly.GetType("Vector3d2")).FirstOrDefault(t => t != null) ?? T("Scatterer.Vector3d2");
+                if (oceanNodeType != null)
+                {
+                    mapFields = new[] { "m_map1", "m_map2", "m_map3", "m_map4" }.Select(n => oceanNodeType.GetField(n, F)).ToArray();
+                    gridField = oceanNodeType.GetField("m_gridSizes", F);
+                    chopField = oceanNodeType.GetField("m_choppyness", F);
+                    uxField = oceanNodeType.GetField("ux", F);
+                    uyField = oceanNodeType.GetField("uy", F);
+                    uzField = oceanNodeType.GetField("uz", F);
+                    ooField = oceanNodeType.GetField("oo", F);
+                    offsetField = oceanNodeType.GetField("offset", F);
+                    managerField = oceanNodeType.GetField("prolandManager", F);
+                    bodyField = managerField?.FieldType.GetField("parentCelestialBody", F);
+                    radiusMethod = managerField?.FieldType.GetMethod("GetRadius", F, null, Type.EmptyTypes, null);
+                }
+                if (vec3d2Type == null && uxField != null)
+                    vec3d2Type = uxField.FieldType;
+                vx = vec3d2Type?.GetField("x", F);
+                vy = vec3d2Type?.GetField("y", F);
+                vz = vec3d2Type?.GetField("z", F);
+            }
+            bool fields = oceanNodeType != null && mapFields.All(f => f != null) && gridField != null && chopField != null && uxField != null
+                && uyField != null && uzField != null && ooField != null && offsetField != null && bodyField != null && radiusMethod != null && vx != null;
+            CelestialBody main = FlightGlobals.currentMainBody;
+            if (fields && (oceanNode == null || !oceanNode.gameObject.activeInHierarchy) && Time.unscaledTime > nextNodeSearch)
+            {
+                nextNodeSearch = Time.unscaledTime + 2;
+                oceanNode = null;
+                foreach (UnityEngine.Object o in FindObjectsOfType(oceanNodeType))
+                    if (o is Component c && c.gameObject.activeInHierarchy && (object)bodyField.GetValue(managerField.GetValue(c)) == main)
+                        oceanNode = c;
+            }
+            object mgr = oceanNode != null ? managerField.GetValue(oceanNode) : null;
+            int state = !fields ? 1 : oceanNode == null ? 2 : 0;
+            for (int i = 0; state == 0 && i < 4; i++)
+            {
+                Texture t = mapFields[i].GetValue(oceanNode) as Texture;
+                if (t == null)
+                    state = 3;
+                mat.SetTexture(OurMaps[i], t);
+            }
+            if (state == 0)
+            {
+                // its frame: world -> local (the body's centre; at the space centre its local transform's) -> ocean
+                Vector3d body = HighLogic.LoadedScene == GameScenes.SPACECENTER && mgr.GetType().GetField("parentLocalTransform", F)?.GetValue(mgr) is Transform plt
+                    ? (Vector3d)plt.position : ((CelestialBody)bodyField.GetValue(mgr)).position;
+                Vector3d origin = body + V3(ooField.GetValue(oceanNode)), off = V3(offsetField.GetValue(oceanNode));
+                mat.SetVector("_WWOX", (Vector3)V3(uxField.GetValue(oceanNode)));
+                mat.SetVector("_WWOY", (Vector3)V3(uyField.GetValue(oceanNode)));
+                mat.SetVector("_WWOZ", (Vector3)V3(uzField.GetValue(oceanNode)));
+                mat.SetVector("_WWOOrigin", (Vector3)origin);
+                mat.SetVector("_WWOCamPos", new Vector4((float)off.x, (float)off.y, (float)off.z, 0));
+                mat.SetVector("_WWOGrid", (Vector4)gridField.GetValue(oceanNode));
+                mat.SetVector("_WWOChop", (Vector4)chopField.GetValue(oceanNode));
+                mat.SetFloat("_WWORadius", (float)(double)radiusMethod.Invoke(mgr, null));
+            }
+            mat.SetFloat("_WWFftOn", state == 0 ? 1 : 0);
+            if (state != wavesState)
+            {
+                wavesState = state;
+                Debug.Log("[WaterWakes] forward ocean foam lit by " + (state == 0
+                    ? $"Scatterer's wave slopes (grids {gridField.GetValue(oceanNode)}, chop {chopField.GetValue(oceanNode)})"
+                    : "the ocean mesh's depth: " + (state == 1 ? "its ocean node's fields not found" : state == 2 ? "no ocean node for " + main?.name : "its wave maps not made yet")));
+            }
+        }
 
         private void UpdateMap()
         {
@@ -171,7 +317,7 @@ namespace WaterWakes
             {
                 if (map != null)
                     map.Release();
-                map = new RenderTexture(res, res, 0, RenderTextureFormat.R8) { filterMode = FilterMode.Bilinear, wrapMode = TextureWrapMode.Clamp, name = "WaterWakes foam map" };
+                map = new RenderTexture(res, res, 0, MapFormat) { filterMode = FilterMode.Bilinear, wrapMode = TextureWrapMode.Clamp, name = "WaterWakes foam map" };
                 map.Create();
             }
             if (mapCam == null)
@@ -227,7 +373,8 @@ namespace WaterWakes
             {
                 if (nearMap != null)
                     nearMap.Release();
-                nearMap = new RenderTexture(nres, nres, 0, RenderTextureFormat.R8) { filterMode = FilterMode.Bilinear, wrapMode = TextureWrapMode.Clamp, name = "WaterWakes near foam map" };
+                // (four channels: b the splash's whitewater share, FoamMap's _Churn)
+                nearMap = new RenderTexture(nres, nres, 0, RenderTextureFormat.ARGB32) { filterMode = FilterMode.Bilinear, wrapMode = TextureWrapMode.Clamp, name = "WaterWakes near foam map" };
                 nearMap.Create();
             }
             Vector3 look = centre, f3 = main.transform.forward;
@@ -364,11 +511,30 @@ namespace WaterWakes
 
         private void PreRender(Camera cam)
         {
+            if (forward)
+            {
+                // (the pass runs whenever Scatterer draws the ocean: told here whether to do anything)
+                Shader.SetGlobalFloat(OceanOnId, 0);
+                bool any = cam != null && cam.GetComponent(oceanCbType) != null;
+                if (!any)
+                    return;
+                bool on = HasOcean(cam, true);
+                if (on)
+                {
+                    lastOceanFrame = Time.frameCount;
+                    SetParams(cam);
+                    SetLight(cam);
+                }
+                mat.SetFloat(FwdOnId, on ? 1 : 0);
+                return;
+            }
             if (!HasOcean(cam, true))
                 return;
             lastOceanFrame = Time.frameCount;
             SetParams(cam);
+            SetLight(cam);     // (the sun's direction: our foam's coverage shaded by the waves, pass 0)
             Tint(cam);
+            Bubbles(cam);
             if (mode == 1)
                 return;
             CommandBuffer cb = Record(cam);
@@ -383,6 +549,8 @@ namespace WaterWakes
                 Detach(cam);
             if (cam != null && tinted.Remove(cam) && tintBuffers.TryGetValue(cam, out CommandBuffer tb))
                 cam.RemoveCommandBuffer(CameraEvent.AfterImageEffectsOpaque, tb);
+            if (cam != null && bubbled.Remove(cam) && bubbleBuffers.TryGetValue(cam, out CommandBuffer bb))
+                cam.RemoveCommandBuffer(CameraEvent.AfterImageEffectsOpaque, bb);
         }
 
         // debug: the sea tinted by the wave sim's height, after Scatterer has shaded it
@@ -400,6 +568,23 @@ namespace WaterWakes
             }
             cam.AddCommandBuffer(CameraEvent.AfterImageEffectsOpaque, tb);
             tinted.Add(cam);
+        }
+
+        // the bubbles under our foam (pass 7): their glow added after Scatterer has shaded the sea
+        private readonly Dictionary<Camera, CommandBuffer> bubbleBuffers = new Dictionary<Camera, CommandBuffer>();
+        private readonly HashSet<Camera> bubbled = new HashSet<Camera>();
+
+        private void Bubbles(Camera cam)
+        {
+            if (!Cfg.paintFoam || Cfg.foamBubbles <= 0 || !painting || mat.passCount <= 7 || bubbled.Contains(cam))
+                return;
+            if (!bubbleBuffers.TryGetValue(cam, out CommandBuffer bb))
+            {
+                bubbleBuffers[cam] = bb = new CommandBuffer { name = "WaterWakes foam bubbles" };
+                bb.Blit((Texture)null, BuiltinRenderTextureType.CameraTarget, mat, 7);
+            }
+            cam.AddCommandBuffer(CameraEvent.AfterImageEffectsOpaque, bb);
+            bubbled.Add(cam);
         }
 
         private void Detach(Camera cam)
@@ -440,6 +625,7 @@ namespace WaterWakes
                 mat.SetTexture("_WakeFoamMap", map);
             bool nearOn = nearMap != null && nearMatrix != Matrix4x4.zero;
             mat.SetFloat("_WakeNearOn", nearOn ? 1 : 0);
+            mat.SetFloat("_WakeNearChurn", 1);
             mat.SetMatrix("_WakeNearMatrix", nearMatrix);
             if (nearMap != null)
                 mat.SetTexture("_WakeNearMap", nearMap);

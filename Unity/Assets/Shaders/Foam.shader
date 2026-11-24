@@ -7,6 +7,8 @@ Shader "WaterWakes/Foam"
         _MainTex ("Foam atlas", 2D) = "white" {}
         _Crisp ("Crisp edges", Range(0, 1)) = 0
         _Bright ("Brightness", Float) = 1
+        _Under ("Bubbles under the surface (foam map)", Range(0, 1)) = 0.3
+        _Churn ("Whitewater (foam map)", Range(0, 1)) = 0
     }
     SubShader
     {

@@ -16,3 +16,5 @@ unitybuild.log
 KspTests/**/bin/
 KspTests/**/obj/
 KspTests/Directory.Build.props.user
+tools/ksptest/mods/Scatterer/
+tools/ksptest/mods/StockScattererConfigs/

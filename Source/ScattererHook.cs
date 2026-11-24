@@ -27,12 +27,16 @@ namespace WaterWakes
             Type ocb = AssemblyLoader.loadedAssemblies.Select(a => a.assembly.GetType("Scatterer.OceanCommandBuffer")).FirstOrDefault(t => t != null);
             if (!harmony || ocb == null)
             {
-                Debug.Log($"[WaterWakes] ocean displacement hook off ({(!harmony ? "no Harmony" : "no Scatterer deferred ocean")})");
+                Debug.Log($"[WaterWakes] ocean hooks off ({(!harmony ? "no Harmony" : "no Scatterer ocean")})");
                 return;
             }
             try
             {
-                ScattererHookPatch.Apply(ocb);
+                // 0.0878 and before: one forward ocean pass (RecreateCommandBuffer); 0.09xx: the deferred ocean (RecreateCommandBuffers)
+                if (AccessTools.Method(ocb, "RecreateCommandBuffer") != null)
+                    ForwardOceanHook.Apply(ocb);
+                else
+                    ScattererHookPatch.Apply(ocb);
             }
             catch (Exception e)
             {

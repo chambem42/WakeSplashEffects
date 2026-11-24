@@ -25,7 +25,13 @@ namespace WaterWakes
                         shaders[s.name] = s;
                     b.Unload(false);   // (b then == null: Unity's)
                 }
-                Debug.Log($"[WaterWakes] shaders: {(!loaded ? "none (no " + BundlePath + ")" : string.Join(", ", shaders.Keys))}");
+                var unsupported = new List<string>();
+                foreach (Shader s in shaders.Values)
+                    if (!s.isSupported)
+                        unsupported.Add(s.name);
+                Debug.Log($"[WaterWakes] shaders ({SystemInfo.graphicsDeviceType}): " +
+                          (!loaded ? "none (no " + BundlePath + ")" : string.Join(", ", shaders.Keys)) +
+                          (unsupported.Count > 0 ? "; not supported here: " + string.Join(", ", unsupported) : ""));
             }
             return shaders.TryGetValue(name, out Shader sh) && sh != null && sh.isSupported ? sh : null;
         }
