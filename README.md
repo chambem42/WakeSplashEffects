@@ -40,8 +40,9 @@ python Unity/fix_bundle.py GameData/WaterWakes/Shaders/waterwakes.shaders   # ne
 `git submodule update --init`). `SplashTests` drops bodies onto still water (a cylinder upright and on its side, a ball,
 a wedge, the Mk1-3 pod at Apollo's size) and surfaces a submarine, recording FAR's water slam and the splash; the crafts
 come from `KspTests/WaterWakes.KspTests.Run/crafts/generator/splash_crafts.py`. FAR's water model makes the slam: until
-a FAR release has it, point `FarGameData` (or `FAR_GAMEDATA`) at a FAR build's `GameData/FerramAerospaceResearch`, and
-`KspDir` (or `KSPDIR`) at a KSP install, in `KspTests/Directory.Build.props.user`. CustomProceduralParts is built from
+a stable FAR release has it, the tests pin FAR's testing release 0.17.0.4 from CKAN. To test another FAR build, point
+`FarGameData` (or `FAR_GAMEDATA`) at its `GameData/FerramAerospaceResearch`; set `KspDir` (or `KSPDIR`) to a KSP install.
+Both go in `KspTests/Directory.Build.props.user`. CustomProceduralParts is built from
 its repository at a pinned commit (`SplashTests.Mods`).
 
 ```
@@ -49,3 +50,8 @@ cd KspTests
 dotnet build WaterWakes.KspTests.Run
 KSPTEST_EXPLICIT=1 KSPTEST_PARAMS="cylinderDrops=8@5" dotnet test WaterWakes.KspTests.Run --no-build --filter "FullyQualifiedName~Splash_CylinderDrops"
 ```
+
+CI (`.github/workflows/tests.yml`) runs them through KspTest's reusable workflow on Windows and Linux, building the mod
+against the game's assemblies (`.github/ci/build.sh`). A push runs each drop body's 4 t drop from 20 m, which
+checks the particles WaterWakes emits, by kind (`WakeStats`), against a baseline (`SplashTests.CheckCounts`); run the
+workflow by hand with `explicit` (`1` or test names) and `params` for others.

@@ -1,0 +1,56 @@
+name: Tests
+
+# The in-game tests (KspTests/WaterWakes.KspTests.Run) in KSP 1.12.5 on GitHub's Windows and Linux runners, side by
+# side, through KspTest's reusable workflow: the game from KspTest's game broker (or the environment ksp-game:
+# KSP_GAME_KEY, KSP_GAME_TOKEN, KSP_GAME_REPO; with neither the tests are skipped), a fork's pull request only once
+# someone with write access has reviewed it and labelled it run-ingame. The mod is built against the game's own
+# assemblies and Harmony from CKAN (.github/ci/build.sh); the shader bundle holds D3D11 and OpenGL core programs.
+#
+# The splash tests are Explicit (measurements): a push runs each drop body's 4 t drop from 20 m, whose particles are
+# checked against their baseline (SplashTests.CheckCounts; .github/ci/build.sh sets that up). By hand: explicit = 1
+# (all) or test names ; separated, params as KSPTEST_PARAMS (cylinderDrops=8@5, say).
+
+on:
+  push:
+    branches: ['**']
+  pull_request_target:
+    types: [opened, synchronize, reopened, labeled]
+  workflow_dispatch:
+    inputs:
+      filter:
+        description: dotnet test --filter (default all but the Explicit tests)
+        required: false
+        default: ""
+      explicit:
+        description: Explicit tests to run (KSPTEST_EXPLICIT) - 1 for all, or names ; separated
+        required: false
+        default: ""
+      params:
+        description: Test parameters (KSPTEST_PARAMS), name=value ; separated
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.event_name == 'push' && github.ref_name != github.event.repository.default_branch && github.ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  ingame:
+    uses: chambem42/KspTest/.github/workflows/ingame.yml@main
+    permissions:
+      contents: read
+      pull-requests: write
+      statuses: write
+      # the job's OIDC token, for KspTest's game broker
+      id-token: write
+    secrets: inherit
+    with:
+      test-project: KspTests/WaterWakes.KspTests.Run
+      title: WaterWakes in-game tests
+      legs: '["windows", "linux"]'
+      mods: Harmony2
+      prepare: bash .github/ci/build.sh
+      filter: ${{ inputs.filter }}
