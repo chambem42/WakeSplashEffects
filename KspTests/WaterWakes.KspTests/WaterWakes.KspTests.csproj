@@ -24,4 +24,9 @@
 
     <Import Project="$(KspTestRoot)/build/KspTest.FromSource.targets" />
 
+    <!-- (the recorder's sound: UnityEngine.AudioRenderer) -->
+    <ItemGroup>
+        <Reference Include="UnityEngine.AudioModule" HintPath="$(KspManaged)/UnityEngine.AudioModule.dll" Private="false" />
+    </ItemGroup>
+
 </Project>

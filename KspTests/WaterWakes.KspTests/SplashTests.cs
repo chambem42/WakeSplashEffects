@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -26,6 +27,63 @@ namespace WaterWakes.KspTests
 
         private const double OreUnitsPerM3 = 139.664;              // ProceduralParts' Ore tank
 
+        // Each body's particles, by kind, from its 4 t drop from 20 m (the first of the default drops; the later ones carry
+        // the last one's wallowing, a capsule's most), measured 2026-11-24 at 165 and at 50 frames a game second (maxFps=20,
+        // as a CI runner draws) and averaged: the two within ~20% of each other for every kind of 50 or more. Kinds left
+        // out had 0.
+        private const double CheckMass = 4, CheckHeight = 20;
+
+        private static readonly Dictionary<string, Dictionary<string, long>> Baseline = new Dictionary<string, Dictionary<string, long>>
+        {
+            ["Cylinder"] = new Dictionary<string, long>
+            {
+                ["skirt"] = 1406, ["sheet"] = 341, ["spray"] = 1420, ["splash cloud"] = 2224, ["haze"] = 2, ["mist"] = 206,
+                ["splash mist"] = 480, ["foam"] = 86, ["splash foam"] = 364, ["upwell"] = 328,
+            },
+            ["SideCylinder"] = new Dictionary<string, long>
+            {
+                ["skirt"] = 1551, ["sheet"] = 274, ["spray"] = 1152, ["splash cloud"] = 2205, ["haze"] = 4, ["mist"] = 215,
+                ["splash mist"] = 461, ["foam"] = 109, ["splash foam"] = 415, ["upwell"] = 319,
+            },
+            ["Sphere"] = new Dictionary<string, long>
+            {
+                ["skirt"] = 856, ["sheet"] = 461, ["spray"] = 1360, ["slam spray"] = 5, ["splash cloud"] = 699, ["haze"] = 2,
+                ["mist"] = 150, ["splash mist"] = 153, ["splash foam"] = 252, ["upwell"] = 322,
+            },
+            // (an edge-down wedge throws no skirt and no splash cloud: its waterline spreads slower than it goes in)
+            ["Wedge"] = new Dictionary<string, long>
+            {
+                ["sheet"] = 976, ["spray"] = 2541, ["mist"] = 22,
+            },
+            ["Capsule"] = new Dictionary<string, long>
+            {
+                ["skirt"] = 2716, ["sheet"] = 508, ["spray"] = 1761, ["slam spray"] = 2, ["splash cloud"] = 2358, ["haze"] = 10,
+                ["mist"] = 372, ["splash mist"] = 470, ["foam"] = 76, ["splash foam"] = 703, ["upwell"] = 332,
+            },
+        };
+
+        /// <summary>
+        /// The 4 t drop from 20 m's particles against the body's Baseline, when it is the first drop (as the baseline's
+        /// was; a later one carries the last one's wallowing): a kind of 50 or more within half to twice its count, any
+        /// other (the rare ones and those it throws none of) under 150. Recorded; returns what is off (null if nothing or
+        /// not checked), for the caller to fail on once every drop is done. Off with countCheck=false.
+        /// </summary>
+        private static string CheckCounts(TestContext ctx, string name, bool firstDrop, double mass, double dropHeight, Dictionary<string, long> emitted)
+        {
+            if (!firstDrop || mass != CheckMass || dropHeight != CheckHeight || ctx.Param("countCheck") == "false" || !Baseline.TryGetValue(name, out var expected))
+                return null;
+            var off = new List<string>();
+            foreach (string kind in WakeCounts.Kinds.Union(emitted.Keys))
+            {
+                long n = WakeCounts.Get(emitted, kind), b = expected.TryGetValue(kind, out long e) ? e : 0;
+                bool ok = b >= 50 ? n >= b / 2 && n <= b * 2 : n < 150;
+                if (!ok)
+                    off.Add(b >= 50 ? $"{kind} {n} (expected {b / 2}-{b * 2})" : $"{kind} {n} (expected under 150)");
+            }
+            ctx.Record("particle check", off.Count == 0 ? $"{name}'s {CheckMass:F0} t drop from {CheckHeight:F0} m: every kind as expected" : string.Join("; ", off));
+            return off.Count == 0 ? null : $"{name}'s particles off their baseline: {string.Join("; ", off)}";
+        }
+
         // what faces the water from above (m2): the upright cylinder, ball and wedge a 2.5 m disc's; the cylinder on its
         // side its 2.5 x 4 m; the pod its 3.91 m heat shield's
         private static double PlanArea(string name) =>
@@ -44,7 +102,9 @@ namespace WaterWakes.KspTests
         /// splash.csv (a row a drop); record=true: a video (frames/, drops.txt: each drop's first frame;
         /// impacts.txt: the frame each reaches the water, its mass, height and speed, to line the drops up side by side),
         /// the camera camDistance m (default 20) off, camPitch deg (default 3) down, aimed camAim m (default 4) above the
-        /// water where it falls. Recorded, not asserted.
+        /// water where it falls. Recorded (with WaterWakes' particles by kind, splash.csv's n_ columns, and the frames a
+        /// game second, fps; maxFps=N holds the frame rate to N), not asserted, but for the particles of its 4 t drop from
+        /// 20 m (CheckCounts).
         /// </summary>
         [UITest(Kind = "Measure", Explicit = true, Mods = Mods, StartsAt = StartState.Flight, Craft = "Splash Cylinder", CraftDir = "VAB",
                 LaunchSite = "LaunchPad", TimeoutSec = 2400)]
@@ -114,7 +174,33 @@ namespace WaterWakes.KspTests
             bool crashWas = CheatOptions.NoCrashDamage, jointsWas = CheatOptions.UnbreakableJoints;
             CheatOptions.NoCrashDamage = true;
             CheatOptions.UnbreakableJoints = true;
+            // (maxFps=N: the frame rate held to N, VSync off, as a slow machine (a CI runner's software rendering) draws)
+            int vsyncWas = QualitySettings.vSyncCount, targetFpsWas = Application.targetFrameRate;
+            int maxFps = (int)ctx.ParamDouble("maxFps", 0);
+            if (maxFps > 0)
+            {
+                QualitySettings.vSyncCount = 0;
+                Application.targetFrameRate = maxFps;
+                ctx.Record("maxFps", $"{maxFps} frames a second (vsync {vsyncWas} -> 0)");
+            }
             GameObject recorderGo = null, anchorGo = null;
+            // (param farSet=Name=value|Name=value: FAR's PartHydrodynamics static coefficients for this run, put back after)
+            var farWas = new System.Collections.Generic.List<(System.Reflection.FieldInfo f, object was)>();
+            if (!string.IsNullOrEmpty(ctx.Param("farSet")))
+            {
+                Type hdType = AssemblyLoader.loadedAssemblies.Select(a => a.assembly.GetType("FerramAerospaceResearch.FARAeroComponents.PartHydrodynamics"))
+                                            .FirstOrDefault(t => t != null);
+                Assert.True(hdType != null, "FAR's PartHydrodynamics found for farSet");
+                foreach (string kv in ctx.Param("farSet").Split('|'))
+                {
+                    string[] s = kv.Split('=');
+                    System.Reflection.FieldInfo f = hdType.GetField(s[0].Trim(), System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+                    Assert.True(f != null, $"FAR static {s[0]} found");
+                    farWas.Add((f, f.GetValue(null)));
+                    f.SetValue(null, Convert.ChangeType(double.Parse(s[1], CultureInfo.InvariantCulture), f.FieldType));
+                    ctx.Record("farSet", $"{f.Name} {farWas[farWas.Count - 1].was} -> {f.GetValue(null)}");
+                }
+            }
             try
             {
                 // which way is up in the tank, as it stands on the pad (as built): each drop holds it so
@@ -153,7 +239,8 @@ namespace WaterWakes.KspTests
                 TestTools.Recorder rec = null;
                 StringBuilder drops = null, hits = new StringBuilder("frame,mass_t,drop_m,impact_ms,body\n");
                 string dropsPath = null;
-                if (ctx.Param("record") == "true" || demo)
+                bool recording = ctx.Param("record") == "true" || ctx.Param("record") == "video";
+                if (recording || demo)
                 {
                     anchorGo = new GameObject("SplashCameraAnchor");
                     var anchor = anchorGo.AddComponent<TestTools.SurfaceAnchor>();
@@ -170,7 +257,7 @@ namespace WaterWakes.KspTests
                     cam.camPitch = (float)(ctx.ParamDouble("camPitch", 3) * Mathf.Deg2Rad);
                     cam.camHdg = (float)(ctx.ParamDouble("camHeading", 0) * Mathf.Deg2Rad);
                 }
-                if (ctx.Param("record") == "true" && !demo)
+                if (recording && !demo)
                 {
                     GameEvents.onHideUI.Fire();
                     string frames = Path.Combine(outDir, "frames");
@@ -178,7 +265,18 @@ namespace WaterWakes.KspTests
                     recorderGo = new GameObject("SplashRecorder");
                     rec = recorderGo.AddComponent<TestTools.Recorder>();
                     rec.Dir = frames;
-                    Time.captureFramerate = Math.Max(1, (int)ctx.ParamDouble("fps", 30));
+                    rec.Fps = Math.Max(1, (int)ctx.ParamDouble("fps", 30));
+                    // (record=video: <body>/video.mp4 with sound, piped to ffmpeg as it goes (param ffmpeg: its path); frames/
+                    // keeping only drops.txt / impacts.txt)
+                    if (ctx.Param("record") == "video")
+                    {
+                        rec.Video = Path.Combine(outDir, "video.mp4");
+                        rec.ToneTest = ctx.Param("toneTest") == "true";
+                        rec.SoundVolume = (float)ctx.ParamDouble("soundVolume", 0.5);
+                        if (!string.IsNullOrEmpty(ctx.Param("ffmpeg")))
+                            rec.Ffmpeg = ctx.Param("ffmpeg");
+                    }
+                    Time.captureFramerate = rec.Fps;
                     drops = new StringBuilder();
                     dropsPath = Path.Combine(frames, "drops.txt");
                 }
@@ -186,8 +284,13 @@ namespace WaterWakes.KspTests
                 // (and splash-steps.csv: each physics step from 0.2 s before it reaches the water to 3 s after: its depth, speed,
                 // acceleration, and the water's force as FAR gives it beside what its acceleration says (mass x (acc - g)))
                 var steps = new StringBuilder("mass_t,t_s,low_m,vz_ms,acc_up_g,far_water_up_kN,far_impact_up_kN,needed_up_kN,unexplained_kN\n");
-                var csv = new StringBuilder("mass_t,density_ratio,drop_m,impact_ms,v_after_0.1s_ms,peak_decel_g,peak_slam_kN,slam_pressure_kPa,max_depth_m,rebound_m,t_max_depth_s\n");
+                var csv = new StringBuilder("mass_t,density_ratio,drop_m,impact_ms,v_after_0.1s_ms,peak_decel_g,peak_slam_kN,slam_pressure_kPa,max_depth_m,rebound_m,t_max_depth_s" +
+                                         string.Concat(WakeCounts.Kinds.Select(k => ",n_" + k.Replace(' ', '_'))) + ",fps\n");
                 var fixedWait = new WaitForFixedUpdate();
+                // (param dampLog=true: splash-damp.csv, below)
+                StringBuilder damp = ctx.Param("dampLog") == "true" ? new StringBuilder("t_s,tilt_deg,spin_degs,vz_ms,part:rb_drag:rb_angdrag:angDragByFI:submerged...\n") : null;
+                string countsOff = null;
+                bool firstDrop = true;
                 foreach ((double mass, double dropHeight) in plan)
                 {
                     ctx.Step($"{mass:F0} t from {dropHeight:F0} m");
@@ -246,6 +349,10 @@ namespace WaterWakes.KspTests
                     // (the tank's own velocity: the vessel's srf_velocity reads 0 once a floater has slowed, while it still moves)
                     Vector3 Vel() => tank.Rigidbody.velocity + (Vector3)Krakensbane.GetFrameVelocity();
                     Vector3 velWas = Vel();
+                    // (WaterWakes' particles from here to the end of the settle: each kind's count; and the frames drawn a game
+                    // second, which some of them depend on)
+                    Dictionary<string, long> emittedBefore = WakeCounts.Snapshot();
+                    int frameBefore = Time.frameCount;
                     t0 = Planetarium.GetUniversalTime();
                     double fall = Math.Sqrt(2 * dropHeight / 9.81);
                     while (Planetarium.GetUniversalTime() - t0 < fall + settleSec)
@@ -280,6 +387,18 @@ namespace WaterWakes.KspTests
                         }
                         if (!wet)
                             continue;
+                        // (splash-damp.csv: its wallowing from the hit to the end: tilt off upright, spin rate, heave speed, and
+                        // each part's rigidbody drag and angular drag as Unity applied them this step (stock's slow-float
+                        // damping or not), with its submerged share)
+                        if (damp != null)
+                        {
+                            damp.Append(string.Join(",", F(t - tImpact), F(Vector3.Angle(tank.transform.TransformDirection(localUp), up)),
+                                                    F(tank.Rigidbody.angularVelocity.magnitude * 180 / Math.PI), F(Vector3.Dot(Vel(), up))));
+                            foreach (Part p in v.parts)
+                                if (p.Rigidbody != null)
+                                    damp.Append($",{p.partInfo.name}:{F(p.Rigidbody.drag)}:{F(p.Rigidbody.angularDrag)}:{(p.angularDragByFI ? 1 : 0)}:{F(p.submergedPortion)}");
+                            damp.AppendLine();
+                        }
                         if (double.IsNaN(vAfter) && t - tImpact >= 0.1)
                             vAfter = -Vector3.Dot(Vel(), up);
                         peakDecel = Math.Max(peakDecel, Vector3.Dot(acc, up) / 9.81 + 1);   // (up, in g, gravity's own taken out)
@@ -294,17 +413,28 @@ namespace WaterWakes.KspTests
                             rebound = Math.Max(rebound, low);
                     }
                     double area = PlanArea(name);
+                    Dictionary<string, long> emitted = WakeCounts.Delta(emittedBefore, WakeCounts.Snapshot());
+                    double fps = (Time.frameCount - frameBefore) / Math.Max(1e-3, Planetarium.GetUniversalTime() - t0);
                     csv.AppendLine(string.Join(",", F(m), F(m / volume), F(dropHeight), F(vImpact), F(vAfter), F(peakDecel), F(peakSlam), F(peakSlam / area), F(-minLow),
-                                               F(rebound > double.MinValue ? rebound : double.NaN), F(tMin)));
+                                               F(rebound > double.MinValue ? rebound : double.NaN), F(tMin)) +
+                                   string.Concat(WakeCounts.Kinds.Select(k => "," + WakeCounts.Get(emitted, k))) + "," + F(fps));
+                    ctx.Record($"particles {mass:F0} t from {dropHeight:F0} m", $"{WakeCounts.Format(emitted)} ({fps:F0} frames a game second)");
+                    countsOff = CheckCounts(ctx, name, firstDrop, mass, dropHeight, emitted) ?? countsOff;
+                    firstDrop = false;
                     ctx.Record($"drop {mass:F0} t from {dropHeight:F0} m", $"{m:F2} t ({m / volume:F2} x the water it displaces): {vImpact:F1} m/s at the water, {vAfter:F1} m/s 0.1 s later; peak deceleration {peakDecel:F1} g, " +
                                                     $"slam {peakSlam:F0} kN ({peakSlam / area:F0} kPa over its end); its bottom {-minLow:F1} m down after {tMin:F2} s, " +
                                                     $"back up to {(rebound > double.MinValue ? rebound : double.NaN):+0.0;-0.0} m");
                     File.WriteAllText(Path.Combine(outDir, "splash.csv"), csv.ToString());
                     File.WriteAllText(Path.Combine(outDir, "splash-steps.csv"), steps.ToString());
+                    if (damp != null)
+                        File.WriteAllText(Path.Combine(outDir, "splash-damp.csv"), damp.ToString());
                 }
+                Assert.True(countsOff == null, countsOff);
             }
             finally
             {
+                foreach ((System.Reflection.FieldInfo f, object was) in farWas)
+                    f.SetValue(null, was);
                 if (recorderGo != null)
                 {
                     UnityEngine.Object.Destroy(recorderGo);
@@ -319,6 +449,8 @@ namespace WaterWakes.KspTests
                 }
                 CheatOptions.NoCrashDamage = crashWas;
                 CheatOptions.UnbreakableJoints = jointsWas;
+                QualitySettings.vSyncCount = vsyncWas;
+                Application.targetFrameRate = targetFpsWas;
             }
         }
 
@@ -328,7 +460,7 @@ namespace WaterWakes.KspTests
         /// blown), set subDepth m deep (its middle, default 20) pitched subPitch deg nose up (default 25) and moving along
         /// its axis at subSpeed m/s (default 8), aimed to break the surface abeam of the camera (the camera camDistance m off,
         /// default 160, camPitch deg down (default 3), aimed camAim m over the water (default 10), the boat crossing its view
-        /// left to right), then let go and watched watchSec s (default 30). Its centre of mass trimmed as a real boat's: a
+        /// left to right), then let go and watched watchSec s (default 30; frames saved from recordDelay s on, default 0). Its centre of mass trimmed as a real boat's: a
         /// ProceduralParts tank's is at its middle, the hull's buoyancy subCoMForward m nose-ward of it (default 3.33: the
         /// SUBOFF form's fuller bow), which pitched it nose up, wholly under, with nothing to stop it; and subCoMBelow m
         /// under its axis (default 0.5) so it holds level and upright. Writes surfacing.csv each physics step: the
@@ -349,7 +481,7 @@ namespace WaterWakes.KspTests
             // pitched subPitch deg up (25)
             bool blow = ctx.Param("subBlow") != "false";
             double share = ctx.ParamDouble("subMass", 0.88), depth = ctx.ParamDouble("subDepth", blow ? 40 : 20), pitch = ctx.ParamDouble("subPitch", blow ? 0 : 25);
-            double speed = ctx.ParamDouble("subSpeed", 8), watch = ctx.ParamDouble("watchSec", 30);
+            double speed = ctx.ParamDouble("subSpeed", 8), watch = ctx.ParamDouble("watchSec", 30), recordDelay = ctx.ParamDouble("recordDelay", 0);
             double reserve = ctx.ParamDouble("subReserve", 0.12), arm = ctx.ParamDouble("subTankArm", 26);
             double foreTime = ctx.ParamDouble("subForeTime", 6), aftStart = ctx.ParamDouble("subAftStart", 3), aftTime = ctx.ParamDouble("subAftTime", 10);
             bool crashWas = CheatOptions.NoCrashDamage, jointsWas = CheatOptions.UnbreakableJoints;
@@ -408,14 +540,28 @@ namespace WaterWakes.KspTests
 
                 TestTools.Recorder rec = null;
                 string frames = Path.Combine(outDir, "frames");
-                if (ctx.Param("record") == "true")
+                // (record=true: frames/NNNNN.jpg; record=video: Submarine/video.mp4, piped to ffmpeg as it goes (param ffmpeg:
+                // its path), frames/ keeping only impacts.txt)
+                string recMode = ctx.Param("record");
+                if (recMode == "true" || recMode == "video")
                 {
                     GameEvents.onHideUI.Fire();
                     Directory.CreateDirectory(frames);
                     recorderGo = new GameObject("SplashRecorder");
                     rec = recorderGo.AddComponent<TestTools.Recorder>();
                     rec.Dir = frames;
-                    Time.captureFramerate = Math.Max(1, (int)ctx.ParamDouble("fps", 30));
+                    rec.Fps = Math.Max(1, (int)ctx.ParamDouble("fps", 30));
+                    if (recMode == "video")
+                    {
+                        rec.Video = Path.Combine(outDir, "video.mp4");
+                        rec.ToneTest = ctx.Param("toneTest") == "true";
+                        rec.SoundVolume = (float)ctx.ParamDouble("soundVolume", 0.5);
+                        if (!string.IsNullOrEmpty(ctx.Param("ffmpeg")))
+                            rec.Ffmpeg = ctx.Param("ffmpeg");
+                    }
+                    // (recordDelay s after it is let go before any frame is saved: the long run up from the deep, empty sea)
+                    rec.Paused = recordDelay > 0;
+                    Time.captureFramerate = rec.Fps;
                 }
 
                 double comFwd = ctx.ParamDouble("subCoMForward", 3.33), comBelow = ctx.ParamDouble("subCoMBelow", 0.5);
@@ -441,76 +587,276 @@ namespace WaterWakes.KspTests
                 // set there, held a second (still water under the anchor: the frame's origin)
                 Vector3 Dir() => (heading * (float)Math.Cos(pitch * Math.PI / 180) + up0 * (float)Math.Sin(pitch * Math.PI / 180)).normalized;
                 var fixedWait = new WaitForFixedUpdate();
+                // the run, once per view (subViews, default 2 when recording, else 1): the camera abeam as set, then ahead of
+                // it looking back along its path at where it breaks the surface (camFrontDistance / camFrontPitch, default
+                // camDistance / camPitch), the boat set back at its start each time; between them, subViewGap s (default 15)
+                // unrecorded for the first run's spray and foam to clear. One video: the views one after the other
+                int views = (int)ctx.ParamDouble("subViews", rec != null ? 2 : 1);
+                var hits = new StringBuilder("frame,mass_t,drop_m,impact_ms,body\n");
+                for (int view = 0; view < views; view++)
+                {
+                    string csvName = view == 0 ? "surfacing.csv" : $"surfacing_view{view}.csv";
+                    if (view > 0)
+                    {
+                        if (rec != null)
+                            rec.Paused = true;
+                        cam.SetDistanceImmediate((float)ctx.ParamDouble("camFrontDistance", ctx.ParamDouble("camDistance", 160)));
+                        cam.camPitch = (float)(ctx.ParamDouble("camFrontPitch", ctx.ParamDouble("camPitch", 3)) * Mathf.Deg2Rad);
+                        // (turned a quarter round, whichever way puts it looking against the boat's heading)
+                        float hdg0 = cam.camHdg;
+                        cam.camHdg = hdg0 + Mathf.PI / 2;
+                        yield return Wait.Frames(3);
+                        if (Vector3.Dot(Vector3.ProjectOnPlane(cam.mainCamera.transform.forward, up0), -heading) < 0)
+                            cam.camHdg = hdg0 - Mathf.PI / 2;
+                        fore = aft = tankFull;
+                        double tg = Planetarium.GetUniversalTime();
+                        while (Planetarium.GetUniversalTime() - tg < ctx.ParamDouble("subViewGap", 15))
+                            yield return fixedWait;
+                    }
+                    double t0 = Planetarium.GetUniversalTime();
+                    while (Planetarium.GetUniversalTime() - t0 < 1)
+                    {
+                        Vector3d site = body.GetWorldSurfacePosition(lat, lon, 0);
+                        Vector3 up = (Vector3)((site - body.position).normalized);
+                        v.SetRotation(Quaternion.FromToRotation(hull.transform.TransformDirection(localNose), Dir()) * v.transform.rotation);
+                        Vector3d start = site - (Vector3d)heading * ahead - (Vector3d)up * depth;
+                        v.SetPosition(v.vesselTransform.position + (start - (Vector3d)hull.transform.position));
+                        PickBelow();
+                        Trim();
+                        foreach (Part p in v.parts)
+                            if (p.Rigidbody != null)
+                            {
+                                p.Rigidbody.velocity = Dir() * (float)speed - (Vector3)Krakensbane.GetFrameVelocity();
+                                p.Rigidbody.angularVelocity = Vector3.zero;
+                            }
+                        yield return fixedWait;
+                    }
+                    if (rec != null)
+                    {
+                        hits.AppendLine($"{rec.Frame - (int)Math.Round(recordDelay * Math.Max(1, (int)ctx.ParamDouble("fps", 30)))},{F(m)},{F(depth)},{F(speed)},{v.vesselName}");   // (let go before frame 0 when recordDelay)
+                        File.WriteAllText(Path.Combine(frames, "impacts.txt"), hits.ToString());
+                    }
+
+                    // let go: its path in the surface frame, every physics step
+                    var csv = new StringBuilder("t_s,x_m,y_m,z_m,nose_x,nose_y,nose_z,vx_ms,vy_ms,vz_ms,pitch_deg,hydrostatic_up_kN,water_up_kN,weight_kN,submerged,fore_t,aft_t\n");
+                    Vector3 zAxis = Vector3.Cross(heading, up0).normalized;
+                    double topMax = double.MinValue, tTop = 0, pitchMax = double.MinValue;
+                    t0 = Planetarium.GetUniversalTime();
+                    ctx.Step("surfacing");
+                    while (Planetarium.GetUniversalTime() - t0 < watch)
+                    {
+                        yield return fixedWait;
+                        if (rec != null && rec.Paused && Planetarium.GetUniversalTime() - t0 >= recordDelay)
+                            rec.Paused = false;
+                        Assert.True(hull != null && hull.vessel != null && hull.vessel == FlightGlobals.ActiveVessel, "the hull still whole");
+                        if (blow)
+                        {
+                            double tb = Planetarium.GetUniversalTime() - t0;
+                            fore = tankFull * Math.Max(0, 1 - tb / foreTime);
+                            aft = tankFull * Math.Max(0, Math.Min(1, 1 - (tb - aftStart) / aftTime));
+                            Trim();
+                        }
+                        Vector3d site = body.GetWorldSurfacePosition(lat, lon, 0);
+                        Vector3 r = (Vector3)((Vector3d)hull.transform.position - site);
+                        Vector3 nose = hull.transform.TransformDirection(localNose).normalized;
+                        Vector3 vel = hull.Rigidbody.velocity + (Vector3)Krakensbane.GetFrameVelocity();
+                        double t = Planetarium.GetUniversalTime() - t0;
+                        double pt = Math.Asin(Mathf.Clamp(Vector3.Dot(nose, up0), -1, 1)) * 180 / Math.PI;
+                        FarWater hq = FarWater.For(hull);
+                        double g = FlightGlobals.getGeeForceAtPosition(hull.transform.position).magnitude;
+                        csv.AppendLine(string.Join(",", F(t), F(Vector3.Dot(r, heading)), F(Vector3.Dot(r, up0)), F(Vector3.Dot(r, zAxis)),
+                                                   F(Vector3.Dot(nose, heading)), F(Vector3.Dot(nose, up0)), F(Vector3.Dot(nose, zAxis)),
+                                                   F(Vector3.Dot(vel, heading)), F(Vector3.Dot(vel, up0)), F(Vector3.Dot(vel, zAxis)), F(pt),
+                                                   F(hq != null ? Vector3.Dot(hq.Hydrostatic, up0) : double.NaN),
+                                                   F(hq != null ? Vector3.Dot(hq.Force, up0) : double.NaN), F(v.GetTotalMass() * g), F(hull.submergedPortion),
+                                                   F(fore), F(aft)));
+                        double top = Vector3.Dot(r, up0) + Math.Abs(Vector3.Dot(nose, up0)) * SubHalfLength + 5;   // (its highest point, the hull 10 m across)
+                        if (top > topMax)
+                        {
+                            topMax = top;
+                            tTop = t;
+                        }
+                        pitchMax = Math.Max(pitchMax, pt);
+                        if (csv.Length > 0 && ((int)(t / 0.02) % 50) == 0)
+                            File.WriteAllText(Path.Combine(outDir, csvName), csv.ToString());
+                    }
+                    File.WriteAllText(Path.Combine(outDir, csvName), csv.ToString());
+                    ctx.Record(view == 0 ? "surfacing" : "surfacing (front view)", $"its highest point {topMax:F1} m over the water at {tTop:F1} s; pitched up to {pitchMax:F1} deg; " +
+                                            $"the boat's centre of mass {comFwd:F2} m forward of its middle, {comBelow:F2} m under its axis" +
+                                            (blow ? $"; tanks {tankFull:F0} t each, {arm:F0} m fore and aft of it, blown 0-{foreTime:F0} s and {aftStart:F0}-{aftStart + aftTime:F0} s" : ""));
+                }
+            }
+            finally
+            {
+                if (recorderGo != null)
+                {
+                    UnityEngine.Object.Destroy(recorderGo);
+                    Time.captureFramerate = 0;
+                    GameEvents.onShowUI.Fire();
+                }
+                if (anchorGo != null)
+                {
+                    if (FlightGlobals.ActiveVessel != null)
+                        FlightCamera.fetch.SetTargetVessel(FlightGlobals.ActiveVessel);
+                    UnityEngine.Object.Destroy(anchorGo);
+                }
+                CheatOptions.NoCrashDamage = crashWas;
+                CheatOptions.UnbreakableJoints = jointsWas;
+            }
+        }
+
+        /// <summary>
+        /// A many-part plane ditching on the sea: the stock Stearwing A300 airliner (56 parts; craft param to change it),
+        /// gear up, engines idle, set ditchHeight m (default 3) over the water at its lowest point, flying along at
+        /// ditchSpeed m/s (default 55), sinking ditchSink m/s (default 1.5), pitched ditchPitch deg nose up (default 6),
+        /// aimed to touch the water abeam of the camera (ditchAhead m short of it, default speed x height / sink; the camera
+        /// camDistance m off, default 70 following it (camFollow) else 140, camPitch deg down (default 10), aimed camAim m over the water (default 3), the
+        /// plane crossing its view left to right), then let go and watched watchSec s (default 20). Crash damage and joint
+        /// breaking off. Writes ditching.csv each physics step (time, distance along its track from the aim point, its
+        /// lowest point's height, speed, pitch, parts in the water). record=true / video as the other splash tests
+        /// (record=video: Ditching/video.mp4 with sound). Recorded, not asserted.
+        /// </summary>
+        [UITest(Kind = "Measure", Explicit = true, Mods = Mods, StartsAt = StartState.Flight, Craft = "Stearwing A300", CraftDir = "SPH",
+                LaunchSite = "Runway", TimeoutSec = 2400)]
+        public static IEnumerator Splash_PlaneDitching(TestContext ctx)
+        {
+            double h0 = ctx.ParamDouble("ditchHeight", 3), speed = ctx.ParamDouble("ditchSpeed", 55), sink = Math.Max(0.1, ctx.ParamDouble("ditchSink", 1.5));
+            double pitch = ctx.ParamDouble("ditchPitch", 6), watch = ctx.ParamDouble("watchSec", 20), recordDelay = ctx.ParamDouble("recordDelay", 0);
+            double ahead = ctx.ParamDouble("ditchAhead", speed * h0 / sink);
+            bool crashWas = CheatOptions.NoCrashDamage, jointsWas = CheatOptions.UnbreakableJoints;
+            CheatOptions.NoCrashDamage = true;
+            CheatOptions.UnbreakableJoints = true;
+            GameObject recorderGo = null, anchorGo = null;
+            string outDir = Path.Combine(ctx.ResultsDir, "Ditching");
+            Directory.CreateDirectory(outDir);
+            try
+            {
+                if (ctx.Param("noon") == "true")
+                    yield return TestTools.Noon(ctx);
+                yield return Wait.Seconds(3);
+                string said = null;
+                yield return TestTools.PutOnWater(s => said = s);
+                Vessel v = FlightGlobals.ActiveVessel;
+                CelestialBody body = v.mainBody;
+                double lat = v.latitude, lon = v.longitude;
+                int parts0 = v.parts.Count;
+                // (gear up, the engines idle: a glide in)
+                v.ActionGroups.SetGroup(KSPActionGroup.Gear, false);
+                FlightInputHandler.state.mainThrottle = 0;
+                foreach (Part p in v.parts)
+                    p.crashTolerance = 1000;
+                ctx.Record("plane", $"{said}; {v.vesselName}: {parts0} parts, {v.GetTotalMass():F1} t");
+
+                // the camera abeam of where it is to touch the water; its heading across the camera's view
+                anchorGo = new GameObject("SplashCameraAnchor");
+                var anchor = anchorGo.AddComponent<TestTools.SurfaceAnchor>();
+                anchor.Body = body;
+                anchor.Lat = lat;
+                anchor.Lon = lon;
+                anchor.Alt = ctx.ParamDouble("camAim", 3);
+                anchor.Update0();
+                FlightCamera cam = FlightCamera.fetch;
+                cam.setModeImmediate(FlightCamera.Modes.FREE);
+                cam.minPitch = -0.5f;
+                cam.SetTargetTransform(anchorGo.transform);
+                // (camFollow, default true: the aim point kept on the plane as it skims on, the view's angle fixed)
+                bool follow = ctx.Param("camFollow") != "false";
+                cam.SetDistanceImmediate((float)ctx.ParamDouble("camDistance", follow ? 70 : 140));
+                cam.camPitch = (float)(ctx.ParamDouble("camPitch", 10) * Mathf.Deg2Rad);
+                cam.camHdg = (float)(ctx.ParamDouble("camHeading", 0) * Mathf.Deg2Rad);
+                yield return Wait.Frames(10);
+                Vector3 up0 = (body.GetWorldSurfacePosition(lat, lon, 0) - body.position).normalized;
+                Vector3 fwd = Vector3.ProjectOnPlane(cam.mainCamera.transform.forward, up0).normalized;
+                Vector3 heading = Vector3.Cross(up0, fwd).normalized;    // (to the camera's right)
+                ctx.Record("start", $"its lowest point {h0:F1} m over the water, {ahead:F0} m short of the aim point, {speed:F0} m/s, sinking {sink:F1} m/s, pitched {pitch:F1} deg up");
+
+                TestTools.Recorder rec = null;
+                string frames = Path.Combine(outDir, "frames");
+                string recMode = ctx.Param("record");
+                if (recMode == "true" || recMode == "video")
+                {
+                    GameEvents.onHideUI.Fire();
+                    Directory.CreateDirectory(frames);
+                    recorderGo = new GameObject("SplashRecorder");
+                    rec = recorderGo.AddComponent<TestTools.Recorder>();
+                    rec.Dir = frames;
+                    rec.Fps = Math.Max(1, (int)ctx.ParamDouble("fps", 30));
+                    if (recMode == "video")
+                    {
+                        rec.Video = Path.Combine(outDir, "video.mp4");
+                        rec.ToneTest = ctx.Param("toneTest") == "true";
+                        rec.SoundVolume = (float)ctx.ParamDouble("soundVolume", 0.5);
+                        if (!string.IsNullOrEmpty(ctx.Param("ffmpeg")))
+                            rec.Ffmpeg = ctx.Param("ffmpeg");
+                    }
+                    rec.Paused = recordDelay > 0;
+                    Time.captureFramerate = rec.Fps;
+                }
+
+                // set there, held a second: nose along its heading pitched up, belly down, flying along it and sinking
+                Vector3 nose = (heading * (float)Math.Cos(pitch * Math.PI / 180) + up0 * (float)Math.Sin(pitch * Math.PI / 180)).normalized;
+                Vector3 belly = -Vector3.ProjectOnPlane(up0, nose).normalized;
+                Vector3 vel = heading * (float)speed - up0 * (float)sink;
+                var fixedWait = new WaitForFixedUpdate();
                 double t0 = Planetarium.GetUniversalTime();
                 while (Planetarium.GetUniversalTime() - t0 < 1)
                 {
                     Vector3d site = body.GetWorldSurfacePosition(lat, lon, 0);
                     Vector3 up = (Vector3)((site - body.position).normalized);
-                    v.SetRotation(Quaternion.FromToRotation(hull.transform.TransformDirection(localNose), Dir()) * v.transform.rotation);
-                    Vector3d start = site - (Vector3d)heading * ahead - (Vector3d)up * depth;
-                    v.SetPosition(v.vesselTransform.position + (start - (Vector3d)hull.transform.position));
-                    PickBelow();
-                    Trim();
+                    // (a plane's craft: its root's y along the nose, z down through its belly)
+                    v.SetRotation(Quaternion.LookRotation(belly, nose));
+                    Vector3d start = site - (Vector3d)heading * ahead + (Vector3d)up * h0;
+                    v.SetPosition(start);
+                    double low = TestTools.LowestAltitude(v, body);
+                    v.SetPosition(v.vesselTransform.position + up * (float)(h0 - low));
+                    if (follow)
+                    {
+                        anchor.Lat = v.latitude;
+                        anchor.Lon = v.longitude;
+                    }
+                    FlightInputHandler.state.mainThrottle = 0;
                     foreach (Part p in v.parts)
                         if (p.Rigidbody != null)
                         {
-                            p.Rigidbody.velocity = Dir() * (float)speed - (Vector3)Krakensbane.GetFrameVelocity();
+                            p.Rigidbody.velocity = vel - (Vector3)Krakensbane.GetFrameVelocity();
                             p.Rigidbody.angularVelocity = Vector3.zero;
                         }
                     yield return fixedWait;
                 }
-                var hits = new StringBuilder("frame,mass_t,drop_m,impact_ms,body\n");
-                if (rec != null)
-                {
-                    hits.AppendLine($"{rec.Frame},{F(m)},{F(depth)},{F(speed)},{v.vesselName}");
-                    File.WriteAllText(Path.Combine(frames, "impacts.txt"), hits.ToString());
-                }
 
-                // let go: its path in the surface frame, every physics step
-                var csv = new StringBuilder("t_s,x_m,y_m,z_m,nose_x,nose_y,nose_z,vx_ms,vy_ms,vz_ms,pitch_deg,hydrostatic_up_kN,water_up_kN,weight_kN,submerged,fore_t,aft_t\n");
-                Vector3 zAxis = Vector3.Cross(heading, up0).normalized;
-                double topMax = double.MinValue, tTop = 0, pitchMax = double.MinValue;
+                // let go: its path, every physics step
+                var csv = new StringBuilder("t_s,x_m,low_m,speed_ms,pitch_deg,parts_wet,parts\n");
+                double tTouch = -1, minLow = double.MaxValue;
                 t0 = Planetarium.GetUniversalTime();
-                ctx.Step("surfacing");
+                ctx.Step("ditching");
                 while (Planetarium.GetUniversalTime() - t0 < watch)
                 {
                     yield return fixedWait;
-                    Assert.True(hull != null && hull.vessel != null && hull.vessel == FlightGlobals.ActiveVessel, "the hull still whole");
-                    if (blow)
+                    if (rec != null && rec.Paused && Planetarium.GetUniversalTime() - t0 >= recordDelay)
+                        rec.Paused = false;
+                    v = FlightGlobals.ActiveVessel;
+                    if (v == null)
+                        break;
+                    if (follow)
                     {
-                        double tb = Planetarium.GetUniversalTime() - t0;
-                        fore = tankFull * Math.Max(0, 1 - tb / foreTime);
-                        aft = tankFull * Math.Max(0, Math.Min(1, 1 - (tb - aftStart) / aftTime));
-                        Trim();
+                        anchor.Lat = v.latitude;
+                        anchor.Lon = v.longitude;
                     }
-                    Vector3d site = body.GetWorldSurfacePosition(lat, lon, 0);
-                    Vector3 r = (Vector3)((Vector3d)hull.transform.position - site);
-                    Vector3 nose = hull.transform.TransformDirection(localNose).normalized;
-                    Vector3 vel = hull.Rigidbody.velocity + (Vector3)Krakensbane.GetFrameVelocity();
+                    FlightInputHandler.state.mainThrottle = 0;
                     double t = Planetarium.GetUniversalTime() - t0;
-                    double pt = Math.Asin(Mathf.Clamp(Vector3.Dot(nose, up0), -1, 1)) * 180 / Math.PI;
-                    FarWater hq = FarWater.For(hull);
-                    double g = FlightGlobals.getGeeForceAtPosition(hull.transform.position).magnitude;
-                    csv.AppendLine(string.Join(",", F(t), F(Vector3.Dot(r, heading)), F(Vector3.Dot(r, up0)), F(Vector3.Dot(r, zAxis)),
-                                               F(Vector3.Dot(nose, heading)), F(Vector3.Dot(nose, up0)), F(Vector3.Dot(nose, zAxis)),
-                                               F(Vector3.Dot(vel, heading)), F(Vector3.Dot(vel, up0)), F(Vector3.Dot(vel, zAxis)), F(pt),
-                                               F(hq != null ? Vector3.Dot(hq.Hydrostatic, up0) : double.NaN),
-                                               F(hq != null ? Vector3.Dot(hq.Force, up0) : double.NaN), F(v.GetTotalMass() * g), F(hull.submergedPortion),
-                                               F(fore), F(aft)));
-                    double top = Vector3.Dot(r, up0) + Math.Abs(Vector3.Dot(nose, up0)) * SubHalfLength + 5;   // (its highest point, the hull 10 m across)
-                    if (top > topMax)
-                    {
-                        topMax = top;
-                        tTop = t;
-                    }
-                    pitchMax = Math.Max(pitchMax, pt);
-                    if (csv.Length > 0 && ((int)(t / 0.02) % 50) == 0)
-                        File.WriteAllText(Path.Combine(outDir, "surfacing.csv"), csv.ToString());
+                    Vector3d site = body.GetWorldSurfacePosition(lat, lon, 0);
+                    double low = TestTools.LowestAltitude(v, body);
+                    int wet = v.parts.Count(p => p.WaterContact);
+                    if (tTouch < 0 && wet > 0)
+                        tTouch = t;
+                    minLow = Math.Min(minLow, low);
+                    Vector3 nz = v.ReferenceTransform != null ? v.ReferenceTransform.up : v.transform.up;
+                    double pt = Math.Asin(Mathf.Clamp(Vector3.Dot(nz, up0), -1, 1)) * 180 / Math.PI;
+                    Vector3 vv = (Vector3)v.GetSrfVelocity();
+                    csv.AppendLine(string.Join(",", F(t), F(Vector3.Dot((Vector3)((Vector3d)v.CoMD - site), heading)), F(low), F(vv.magnitude), F(pt), wet, v.parts.Count));
                 }
-                File.WriteAllText(Path.Combine(outDir, "surfacing.csv"), csv.ToString());
-                ctx.Record("surfacing", $"its highest point {topMax:F1} m over the water at {tTop:F1} s; pitched up to {pitchMax:F1} deg; " +
-                                        $"the boat's centre of mass {comFwd:F2} m forward of its middle, {comBelow:F2} m under its axis" +
-                                        (blow ? $"; tanks {tankFull:F0} t each, {arm:F0} m fore and aft of it, blown 0-{foreTime:F0} s and {aftStart:F0}-{aftStart + aftTime:F0} s" : ""));
+                File.WriteAllText(Path.Combine(outDir, "ditching.csv"), csv.ToString());
+                ctx.Record("ditching", $"touched the water at {tTouch:F1} s; lowest point down to {minLow:F1} m; {(v != null ? v.parts.Count : 0)} of {parts0} parts still on it");
             }
             finally
             {
