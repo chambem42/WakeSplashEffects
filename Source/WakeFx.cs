@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
@@ -243,6 +244,13 @@ namespace WaterWakes
             // by its own motion, its waterline sweeping along it (a surfacing sub's bow falling back)
             public float wlL, wlB, growL, growB;
             public bool wlSeen;
+            // its spray skirt sampled every physics step (StepSampler), while near the water going in or in its first
+            // SkirtWindow s: the waterline's size (L x B) and the share of its boxes under, a step each since the frame
+            // before, in that frame's flow axes (stepF, stepS); and this frame's growth weighted by how blunt each step's was
+            public bool track;
+            public Vector3 stepF, stepS;
+            public readonly List<Vector2> steps = new List<Vector2>();
+            public float skirtBlunt;
         }
 
         // a slam into the water, kept after the part has gone on: the cavity behind it closes 2.4 sqrt(R / g) later
@@ -290,6 +298,7 @@ namespace WaterWakes
             public bool entry;       // an entry from the air under way: its speed then (eU), its size (eD), how long ago (since), the share of eU it still has (keep)
             public float eU, eD, since, keep;
             public float skirtArea, skirtSpread;   // the waterline's growth this frame (m2) and its spreading speed (m/s): the spray skirt
+            public float skirtBlunt; // ... its growth, each step's weighted by how blunt it was (Blunt): what throws the skirt
             public float spreadMax;  // ... its fastest so far
             public Vector2 tilt;     // its entry's low side (Wetting.tilt)
             public float flat;       // ... and how flat it hit (Wetting.flat)
@@ -601,7 +610,116 @@ namespace WaterWakes
         private float nextPurge, nextLog;
         private int emittedFoam, emittedSpray, emittedMist;
 
-        private void Awake() => Instance = this;
+        private void Awake()
+        {
+            Instance = this;
+            StartCoroutine(StepSampler());
+        }
+
+        // each tracked part's waterline after every physics step: the hull moves only on physics steps, and a slow machine
+        // (25 frames a game second: two steps a frame) saw a ball's first spread over two steps where it went in during
+        // the second (its skirt 195 particles, not 856), and a wedge's over one where it took two
+        private IEnumerator StepSampler()
+        {
+            var wait = new WaitForFixedUpdate();
+            while (true)
+            {
+                yield return wait;
+                foreach (KeyValuePair<Part, Wetting> kv in wetting)
+                    if (kv.Value.track && kv.Key != null && kv.Key.rb != null && kv.Key.vessel != null)
+                        StepSample(kv.Key, kv.Value);
+            }
+        }
+
+        /// <summary>The part's waterline size (L x B, in its last frame's flow axes) and the share of its boxes under
+        /// water now, as Update's cut measures them, added to its Wetting's steps.</summary>
+        private void StepSample(Part p, Wetting wt)
+        {
+            Vessel v = p.vessel;
+            CelestialBody body = v.mainBody;
+            Box[] bs = Boxes(p);
+            Vector3 pos = p.transform.position, f = wt.stepF, s = wt.stepS;
+            Vector3 up = ((Vector3)((Vector3d)pos - body.position)).normalized;
+            double wl = v.waterOffset + (p.partBuoyancy != null ? p.partBuoyancy.waterLevel : 0);
+            float hRef = (float)(FlightGlobals.getAltitudeAtPos((Vector3d)pos, body) - wl);
+            float a0 = float.MaxValue, a1 = float.MinValue, b0 = float.MaxValue, b1 = float.MinValue, vol = 0, volBox = 0;
+            int crossings = 0;
+            void Cross(float x, float y)
+            {
+                a0 = Mathf.Min(a0, x);
+                a1 = Mathf.Max(a1, x);
+                b0 = Mathf.Min(b0, y);
+                b1 = Mathf.Max(b1, y);
+                crossings++;
+            }
+            foreach (Box b in bs)
+            {
+                if (b.t == null)
+                    continue;
+                for (int i = 0; i < 8; i++)
+                {
+                    Vector3 l = b.c + new Vector3((i & 1) != 0 ? b.e.x : -b.e.x, (i & 2) != 0 ? b.e.y : -b.e.y, (i & 4) != 0 ? b.e.z : -b.e.z);
+                    Vector3 w = b.t.TransformPoint(l);
+                    ch[i] = hRef + Vector3.Dot(w - pos, up);
+                    cx[i] = Vector3.Dot(w - pos, f);
+                    cy[i] = Vector3.Dot(w - pos, s);
+                }
+                if (b.verts != null)
+                {
+                    int nv = b.verts.Length;
+                    if (mh.Length < nv)
+                    {
+                        mh = new float[nv];
+                        mx = new float[nv];
+                        my = new float[nv];
+                    }
+                    Matrix4x4 m = b.t.localToWorldMatrix;
+                    for (int i = 0; i < nv; i++)
+                    {
+                        Vector3 w = m.MultiplyPoint3x4(b.verts[i]);
+                        mh[i] = hRef + Vector3.Dot(w - pos, up);
+                        mx[i] = Vector3.Dot(w - pos, f);
+                        my[i] = Vector3.Dot(w - pos, s);
+                    }
+                    int[] tr = b.tris;
+                    for (int t = 0; t + 2 < tr.Length; t += 3)
+                        for (int e = 0; e < 3; e++)
+                        {
+                            int ia = tr[t + e], ic = tr[t + (e + 1) % 3];
+                            if (mh[ia] * mh[ic] >= 0)
+                                continue;
+                            float u = mh[ia] / (mh[ia] - mh[ic]);
+                            Cross(Mathf.Lerp(mx[ia], mx[ic], u), Mathf.Lerp(my[ia], my[ic], u));
+                        }
+                }
+                else
+                {
+                    for (int i = 0; i < 8; i++)
+                        for (int bit = 1; bit < 8; bit <<= 1)
+                        {
+                            int j = i | bit;
+                            if (j == i || ch[i] * ch[j] >= 0)
+                                continue;
+                            float t = ch[i] / (ch[i] - ch[j]);
+                            Cross(Mathf.Lerp(cx[i], cx[j], t), Mathf.Lerp(cy[i], cy[j], t));
+                        }
+                }
+                float bv = 8 * b.t.TransformVector(new Vector3(b.e.x, 0, 0)).magnitude * b.t.TransformVector(new Vector3(0, b.e.y, 0)).magnitude
+                             * b.t.TransformVector(new Vector3(0, 0, b.e.z)).magnitude;
+                float h0 = 0;
+                for (int i = 0; i < 8; i++)
+                    h0 += ch[i] * 0.125f;
+                vol += bv * Submerged(h0, (ch[1] - ch[0]) * 0.5f, (ch[2] - ch[0]) * 0.5f, (ch[4] - ch[0]) * 0.5f);
+                volBox += bv;
+            }
+            float lb = crossings > 1 ? Mathf.Max(0, (a1 - a0) * (b1 - b0)) : 0;
+            wt.steps.Add(new Vector2(lb, volBox > 0 ? vol / volBox : 0));
+        }
+
+        /// <summary>How blunt an entry's waterline growth is, 0-1: as much as it spread faster than the body went in (eU),
+        /// a tilted one's twice as fast along its sweep (the skirt's share of it, below).</summary>
+        private static float Blunt(float spread, Vector2 tilt, float eU) =>
+            Mathf.Clamp01(spread * (1 + Mathf.Min(tilt.magnitude, 1)) / Mathf.Max(eU, 0.1f) - 1f);
 
         private void Start()
         {
@@ -1149,7 +1267,7 @@ namespace WaterWakes
                 Vector3 pos = p.transform.position;
                 float hRef = (float)(FlightGlobals.getAltitudeAtPos((Vector3d)pos, body) - wl);
                 Cut cut = null;
-                float top = float.MinValue, vol = 0, volBox = 0;
+                float top = float.MinValue, low = float.MaxValue, vol = 0, volBox = 0;
                 wpts.Clear();
                 rpts.Clear();
                 dpts.Clear();
@@ -1186,6 +1304,7 @@ namespace WaterWakes
                             my[i] = Vector3.Dot(w - origin, s);
                             rpts.Add(new Vector2(mx[i], my[i]));
                             top = Mathf.Max(top, mh[i]);
+                            low = Mathf.Min(low, mh[i]);
                             if (mh[i] < 0)
                             {
                                 Add(ref cut, mx[i], my[i], -mh[i], wlRel);
@@ -1212,6 +1331,7 @@ namespace WaterWakes
                         {
                             rpts.Add(new Vector2(cx[i], cy[i]));
                             top = Mathf.Max(top, ch[i]);
+                            low = Mathf.Min(low, ch[i]);
                             if (ch[i] < 0)
                             {
                                 Add(ref cut, cx[i], cy[i], -ch[i], wlRel);
@@ -1275,6 +1395,15 @@ namespace WaterWakes
                     wt.growL = wt.growB = 0;
                 }
                 Entry(wt, p, body, origin, f, s, up, volBox > 0 ? vol / volBox : 0, wpts, dt, cfg);
+                // (its skirt sampled each physics step till the next frame (StepSampler) if it is within ~0.15 s of the
+                // water going in, or in its skirt's window)
+                {
+                    float down = Mathf.Max(0, -Vector3.Dot(p.rb.velocity + (Vector3)Krakensbane.GetFrameVelocity(), up));
+                    wt.track = low < 0.5f + 0.15f * down && (wt.dry > 0.3f || wt.enterT >= 0 && Time.time - wt.enterT < SkirtWindow);
+                    wt.stepF = f;
+                    wt.stepS = s;
+                    wt.steps.Clear();
+                }
                 if (cut != null || Mathf.Abs(wt.rate) > 1e-3f)
                 {
                     bool atLine = wf1 >= wf0;
@@ -1355,7 +1484,7 @@ namespace WaterWakes
                             entry = wt.enterT >= 0 && Time.time - wt.enterT < 2f && wt.U > 3f && !(wt.rate < 0),
                             eU = Mathf.Min(wt.U, cfg.splashMaxSpeed), eD = Mathf.Max(0.2f, Mathf.Sqrt(wt.LB)), since = Time.time - wt.enterT,
                             keep = wt.U > 0.1f ? Mathf.Clamp01(wt.un / wt.U) : 1,
-                            skirtArea = wt.skirtArea, skirtSpread = wt.skirtSpread, spreadMax = wt.spreadMax, tilt = wt.tilt, flat = wt.flat, sweep = wt.sweep,
+                            skirtArea = wt.skirtArea, skirtSpread = wt.skirtSpread, skirtBlunt = wt.skirtBlunt, spreadMax = wt.spreadMax, tilt = wt.tilt, flat = wt.flat, sweep = wt.sweep,
                         });
                         // its sound: a slam (an entry from the air, a hull slamming down) or a breach, as fast as it went in or
                         // out, as big as its waterline (the hull slam's stretch)
@@ -2161,10 +2290,11 @@ namespace WaterWakes
                 // (the contact line's own speed: a waterline spreading all one way, from an edge, moves twice as fast as its
                 // size's growth says. A capsule at 27 deg sweeps at ~2 U; by its size's growth, ~1 U, it sat at the bar, with
                 // a sheet at 9.4 m/s (a frame's worth more spread) and next to none at 6.3)
-                float blunt = Mathf.Clamp01(sp.skirtSpread * (1 + Mathf.Min(sp.tilt.magnitude, 1)) / Mathf.Max(sp.eU, 0.1f) - 1f);
+                // (each step's growth weighted by its own: Wetting.skirtBlunt, Blunt)
+                float blunt = sp.skirtBlunt / Mathf.Max(sp.skirtArea, 1e-6f);
                 // (and as see-through as the hit is gentle: Orion's 6 m/s drop a grey veil, its 8.5 m/s one a white wall)
                 float opacity = Mathf.Lerp(0.3f, 1f, Mathf.Clamp01((sp.eU - 5f) / 4f));
-                int ns = Mathf.Min(Count(sp.skirtArea * 150 * (1 + lean) * blunt * fresh * fresh * later * SkirtEnergy(sp.eU) * cfg.skirtAmount * cfg.intensity), 1800);
+                int ns = Mathf.Min(Count(sp.skirtBlunt * 150 * (1 + lean) * fresh * fresh * later * SkirtEnergy(sp.eU) * cfg.skirtAmount * cfg.intensity), 1800);
                 if (cfg.debugLog && sp.skirtArea > 0)
                     Debug.Log($"[WaterWakes] skirt: {ns} blobs, U {sp.eU:F1} m/s, D {sp.eD:F2} m, spread {sp.skirtSpread:F1} m/s, sheet {vs:F1} m/s, sweep {sp.sweep} ({lean:F2}), over open water {fresh:F2}, blunt {blunt:F2}");
                 if (ns > 0 && splashVessel != null && !holes.Exists(h => h.v == splashVessel && Time.time - h.t0 < 3))
@@ -2775,8 +2905,18 @@ namespace WaterWakes
                 wt.lon = body.GetLongitude(site);
             }
             // (the spray skirt: the waterline's growth over the first 0.25 s, whether or not the entry is done measuring)
-            wt.skirtArea = wt.skirtSpread = 0;
-            if (wt.enterT >= 0 && Time.time - wt.enterT < SkirtWindow && line.Count > 1)
+            bool stepped = wt.track;   // (sampled each physics step since the last frame)
+            wt.skirtArea = wt.skirtSpread = wt.skirtBlunt = 0;
+            if (wt.enterT >= 0 && Time.time - wt.enterT < SkirtWindow && line.Count > 1 && stepped)
+            {
+                // (each step's growth over its step: as a machine at a frame a step or faster sees it; steps before it
+                // was in (under 2% of it) skipped, as a frame that saw it so is)
+                float eU = Mathf.Min(Mathf.Max(wt.U, un), cfg.splashMaxSpeed), step = Mathf.Max(TimeWarp.fixedDeltaTime, 1e-3f);
+                foreach (Vector2 q in wt.steps)
+                    if (q.y >= 0.02f)
+                        Grow(wt, q.x, step, eU);
+            }
+            else if (wt.enterT >= 0 && Time.time - wt.enterT < SkirtWindow && line.Count > 1)
             {
                 float a0 = float.MaxValue, a1 = float.MinValue, b0 = float.MaxValue, b1 = float.MinValue;
                 foreach (Vector2 q in line)
@@ -2787,23 +2927,10 @@ namespace WaterWakes
                     b1 = Mathf.Max(b1, q.y);
                 }
                 float lb = Mathf.Max(0, (a1 - a0) * (b1 - b0));
-                if (lb > wt.lbSkirt)
-                {
-                    wt.skirtArea = lb - wt.lbSkirt;
-                    // (over a physics step at least: the hull moves only on physics steps, so at a frame rate above them a
-                    // step's growth shows in one frame, and over the frame's dt it read up to 7x fast at 165 fps: a wedge
-                    // threw a skirt on a fast machine and none on a slow one)
-                    wt.skirtSpread = (Mathf.Sqrt(lb) - Mathf.Sqrt(wt.lbSkirt)) * 0.5f / Mathf.Max(dt, TimeWarp.fixedDeltaTime, 1e-3f);
-                    wt.lbSkirt = lb;
-                    wt.spreadMax = Mathf.Max(wt.spreadMax, wt.skirtSpread);
-                    // (its sweep: known from its first frame in, from where it touched and how fast the line crosses)
-                    wt.sweep = -wt.tilt * Mathf.Clamp01(wt.U / Mathf.Max(2 * wt.spreadMax, 0.1f) / SweepFullSlope);
-                    // (flat: its submerged vertices' depths alike across their spread, a few percent of it at most; a flat
-                    // face 5 deg off square gets 0.17, a ball or a heat shield far more)
-                    float half = 0.25f * ((subF1 - subF0) + (subS1 - subS0));
-                    if (subHi >= subLo && half > 0.05f)
-                        wt.flat = Mathf.Max(wt.flat, 1 - Mathf.Clamp01(((subHi - subLo) / half - 0.03f) / 0.1f));
-                }
+                // (over a physics step at least: the hull moves only on physics steps, so at a frame rate above them a
+                // step's growth shows in one frame, and over the frame's dt it read up to 7x fast at 165 fps: a wedge
+                // threw a skirt on a fast machine and none on a slow one)
+                Grow(wt, lb, Mathf.Max(dt, TimeWarp.fixedDeltaTime, 1e-3f), Mathf.Min(Mathf.Max(wt.U, un), cfg.splashMaxSpeed));
             }
             if (wt.enterT < 0 || wt.impacted)
                 return;
@@ -2842,6 +2969,27 @@ namespace WaterWakes
                                  band = Mathf.Clamp01((wt.spreadMax / Mathf.Max(U, 0.1f) - 1) / 0.5f) * Mathf.Clamp01((U - 4) / 4) });
             if (rings.Count > 32)
                 rings.RemoveAt(0);
+        }
+
+        /// <summary>The skirt's waterline grown to lb (L x B) over overT s: this frame's growth (several steps' added up,
+        /// their spread area-weighted, and each one's weighted by how blunt it was), its fastest spread, sweep and flatness.</summary>
+        private void Grow(Wetting wt, float lb, float overT, float eU)
+        {
+            if (lb <= wt.lbSkirt)
+                return;
+            float da = lb - wt.lbSkirt, spread = (Mathf.Sqrt(lb) - Mathf.Sqrt(wt.lbSkirt)) * 0.5f / overT;
+            wt.skirtSpread = (wt.skirtSpread * wt.skirtArea + spread * da) / (wt.skirtArea + da);
+            wt.skirtArea += da;
+            wt.skirtBlunt += da * Blunt(spread, wt.tilt, eU);
+            wt.lbSkirt = lb;
+            wt.spreadMax = Mathf.Max(wt.spreadMax, spread);
+            // (its sweep: known from its first frame in, from where it touched and how fast the line crosses)
+            wt.sweep = -wt.tilt * Mathf.Clamp01(wt.U / Mathf.Max(2 * wt.spreadMax, 0.1f) / SweepFullSlope);
+            // (flat: its submerged vertices' depths alike across their spread, a few percent of it at most; a flat
+            // face 5 deg off square gets 0.17, a ball or a heat shield far more)
+            float half = 0.25f * ((subF1 - subF0) + (subS1 - subS0));
+            if (subHi >= subLo && half > 0.05f)
+                wt.flat = Mathf.Max(wt.flat, 1 - Mathf.Clamp01(((subHi - subLo) / half - 0.03f) / 0.1f));
         }
 
         // each slam's Worthington jet (SPH reference runs): when its cavity pinches off, if the body is past ~2 D deep by then
