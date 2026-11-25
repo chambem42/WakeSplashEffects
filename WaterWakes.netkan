@@ -1,0 +1,19 @@
+# CKAN metadata, read by the NetKAN bot through the stub in KSP-CKAN/NetKAN (NetKAN/WaterWakes.netkan).
+# Versions come from the GitHub release tags, KSP compatibility from the .version file in the release zip.
+identifier: WaterWakes
+name: WaterWakes
+abstract: >-
+  Foam trails, bow spray, mist and splashes for craft on the ocean, on the stock ocean and on
+  Scatterer's waves.
+$kref: '#/ckan/github/chambem42/WaterWakes'
+$vref: '#/ckan/ksp-avc'
+license: MIT
+tags:
+  - plugin
+  - graphics
+  - sound
+depends:
+  # the hooks into Scatterer's ocean (the foam painted onto its waves)
+  - name: Harmony2
+recommends:
+  - name: Scatterer
