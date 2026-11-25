@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="WakeSplashEffects.KspTests/WakeSplashEffects.KspTests.csproj" />
+  <Project Path="WakeSplashEffects.KspTests.Run/WakeSplashEffects.KspTests.Run.csproj" />
+</Solution>

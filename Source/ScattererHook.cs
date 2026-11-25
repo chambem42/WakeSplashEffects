@@ -7,7 +7,7 @@ using HarmonyLib;
 using UnityEngine;
 using UnityEngine.Rendering;
 
-namespace WaterWakes
+namespace WakeSplashEffects
 {
     /// <summary>
     /// The wave simulation's heights put into Scatterer's ocean geometry (0.0908's deferred ocean). Scatterer computes
@@ -27,7 +27,7 @@ namespace WaterWakes
             Type ocb = AssemblyLoader.loadedAssemblies.Select(a => a.assembly.GetType("Scatterer.OceanCommandBuffer")).FirstOrDefault(t => t != null);
             if (!harmony || ocb == null)
             {
-                Debug.Log($"[WaterWakes] ocean hooks off ({(!harmony ? "no Harmony" : "no Scatterer ocean")})");
+                Debug.Log($"[WakeSplashEffects] ocean hooks off ({(!harmony ? "no Harmony" : "no Scatterer ocean")})");
                 return;
             }
             try
@@ -40,7 +40,7 @@ namespace WaterWakes
             }
             catch (Exception e)
             {
-                Debug.Log("[WaterWakes] ocean displacement hook off: " + e.Message);
+                Debug.Log("[WakeSplashEffects] ocean displacement hook off: " + e.Message);
             }
         }
     }
@@ -59,11 +59,11 @@ namespace WaterWakes
             MethodInfo recreate = AccessTools.Method(ocb, "RecreateCommandBuffers");
             if (cbField == null || vxField == null || vyField == null || recreate == null)
             {
-                Debug.Log("[WaterWakes] ocean displacement hook off: Scatterer's OceanCommandBuffer is not as expected");
+                Debug.Log("[WakeSplashEffects] ocean displacement hook off: Scatterer's OceanCommandBuffer is not as expected");
                 return;
             }
-            new Harmony("WaterWakes.ScattererOceanDisplacement").Patch(recreate, transpiler: new HarmonyMethod(typeof(ScattererHookPatch), nameof(Transpiler)));
-            Debug.Log($"[WaterWakes] ocean displacement hook {(Patched ? "on" : "NOT placed (no VertexPositions DrawRenderer found)")}");
+            new Harmony("WakeSplashEffects.ScattererOceanDisplacement").Patch(recreate, transpiler: new HarmonyMethod(typeof(ScattererHookPatch), nameof(Transpiler)));
+            Debug.Log($"[WakeSplashEffects] ocean displacement hook {(Patched ? "on" : "NOT placed (no VertexPositions DrawRenderer found)")}");
         }
 
         // after the first CommandBuffer.DrawRenderer (the VertexPositions pass): this.AfterVertexPositions()
@@ -95,19 +95,19 @@ namespace WaterWakes
                     return;
                 if (displaceMat == null)
                 {
-                    Shader sh = WakeShaders.Get("WaterWakes/WaveSim");
+                    Shader sh = WakeShaders.Get("WakeSplashEffects/WaveSim");
                     if (sh == null)
                         return;
                     displaceMat = new Material(sh);
                 }
                 if (kelvinMat == null)
                 {
-                    Shader ks = WakeShaders.Get("WaterWakes/OceanFoam");
+                    Shader ks = WakeShaders.Get("WakeSplashEffects/OceanFoam");
                     if (ks != null && ks.passCount > 5)
                         kelvinMat = new Material(ks);
                 }
                 int positions = Shader.PropertyToID("vertWorldPositionsXYZOceanPositionsXId");
-                int copy = Shader.PropertyToID("WaterWakesVertPositionsCopy");
+                int copy = Shader.PropertyToID("WakeSplashEffectsVertPositionsCopy");
                 cb.GetTemporaryRT(copy, vx, vy, 0, FilterMode.Point, RenderTextureFormat.ARGBFloat);
                 cb.CopyTexture(positions, copy);
                 cb.Blit(copy, positions, displaceMat, 5);
@@ -118,11 +118,11 @@ namespace WaterWakes
                     cb.Blit(copy, positions, kelvinMat, 5);
                 }
                 cb.ReleaseTemporaryRT(copy);
-                Debug.Log($"[WaterWakes] ocean displacement recorded into Scatterer's gbuffer commands ({vx} x {vy} vertices)");
+                Debug.Log($"[WakeSplashEffects] ocean displacement recorded into Scatterer's gbuffer commands ({vx} x {vy} vertices)");
             }
             catch (Exception e)
             {
-                Debug.Log("[WaterWakes] ocean displacement not recorded: " + e.Message);
+                Debug.Log("[WakeSplashEffects] ocean displacement not recorded: " + e.Message);
             }
         }
     }

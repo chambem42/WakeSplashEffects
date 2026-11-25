@@ -1,6 +1,6 @@
 ship = Splash Submarine
 version = 1.2.0
-description = DARPA SUBOFF's bare hull at a real submarine's size (10 m across, 85.8 m long) for WaterWakes' splash tests: one ProceduralParts Ore tank, a Spine, lying level
+description = DARPA SUBOFF's bare hull at a real submarine's size (10 m across, 85.8 m long) for WakeSplashEffects' splash tests: one ProceduralParts Ore tank, a Spine, lying level
 type = VAB
 size = 85.75,10,10
 PART

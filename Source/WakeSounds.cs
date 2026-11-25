@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-namespace WaterWakes
+namespace WakeSplashEffects
 {
     /// <summary>
     /// The splashes' sound. A slam's boom is stock's (FXMonger.Splash's: better than any made here): a part hitting the
@@ -54,7 +54,7 @@ namespace WaterWakes
                 var rnd = new System.Random(4127);
                 pours = new[] { MakePour(rnd, 3.5f), MakePour(rnd, 3f) };
                 hiss = MakeHiss(rnd, 3f);
-                Debug.Log("[WaterWakes] splash sounds made");
+                Debug.Log("[WakeSplashEffects] splash sounds made");
             }
             hissSrc = NewSource();
             hissSrc.clip = hiss;
@@ -70,7 +70,7 @@ namespace WaterWakes
 
         private AudioSource NewSource()
         {
-            var go = new GameObject("WaterWakes sound");
+            var go = new GameObject("WakeSplashEffects sound");
             go.transform.parent = transform;
             AudioSource a = go.AddComponent<AudioSource>();
             a.spatialBlend = 1;
@@ -122,7 +122,7 @@ namespace WaterWakes
             lastShot[source] = new Vector2(now, loud);
             boomed.Add(key);
             if (Cfg.debugLog)
-                Debug.Log($"[WaterWakes] sound: {kind} from {source}, {speed:F1} m/s, {length:F1} x {breadth:F1} m, loudness {loud:F2}");
+                Debug.Log($"[WakeSplashEffects] sound: {kind} from {source}, {speed:F1} m/s, {length:F1} x {breadth:F1} m, loudness {loud:F2}");
             float size = Mathf.Sqrt(area);
             Vector3 cam = FlightCamera.fetch != null ? FlightCamera.fetch.mainCamera.transform.position : pos;
             pending.Add(new Pending
@@ -214,7 +214,7 @@ namespace WaterWakes
             }
             Fade(d, 0.01f, 0.5f);
             Normalise(d, 0.8f);
-            AudioClip c = AudioClip.Create("WaterWakes pour", n, 1, Rate, false);
+            AudioClip c = AudioClip.Create("WakeSplashEffects pour", n, 1, Rate, false);
             c.SetData(d, 0);
             return c;
         }
@@ -238,7 +238,7 @@ namespace WaterWakes
             for (int i = 0; i < n; i++)
                 o[i] = i < x ? Mathf.Lerp(d[n + i], d[i], (float)i / x) : d[i];
             Normalise(o, 0.5f);
-            AudioClip c = AudioClip.Create("WaterWakes hiss", n, 1, Rate, false);
+            AudioClip c = AudioClip.Create("WakeSplashEffects hiss", n, 1, Rate, false);
             c.SetData(o, 0);
             return c;
         }

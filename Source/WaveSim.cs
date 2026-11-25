@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 
-namespace WaterWakes
+namespace WakeSplashEffects
 {
     /// <summary>
     /// A wave simulation on a square of sea around where the camera looks: one height field that the hulls' wakes and the
@@ -44,10 +44,10 @@ namespace WaterWakes
 
         private void Start()
         {
-            Shader sh = WakeShaders.Get("WaterWakes/WaveSim");
+            Shader sh = WakeShaders.Get("WakeSplashEffects/WaveSim");
             if (sh == null)
             {
-                Debug.Log("[WaterWakes] wave sim off: no WaterWakes/WaveSim shader");
+                Debug.Log("[WakeSplashEffects] wave sim off: no WakeSplashEffects/WaveSim shader");
                 enabled = false;
                 return;
             }
@@ -142,7 +142,7 @@ namespace WaterWakes
             string fit = "";
             foreach (double k in new[] { 0.25, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0 })
                 fit += $" {k:F2}: {Resp(k, 0) / k:F2}/{Resp(k / Math.Sqrt(2), k / Math.Sqrt(2)) / k:F2}";
-            Debug.Log($"[WaterWakes] wave sim kernel: {n} radii, centre {kern[P * 13 + P]:F3}, least response {least:F4}, response/k (axis/diagonal){fit}");
+            Debug.Log($"[WakeSplashEffects] wave sim kernel: {n} radii, centre {kern[P * 13 + P]:F3}, least response {least:F4}, response/k (axis/diagonal){fit}");
             // (any negative response lifted: those waves then stand still instead of growing)
             if (least < 0)
                 kern[P * 13 + P] -= (float)least;
@@ -190,7 +190,7 @@ namespace WaterWakes
 
         private RenderTexture Rt(string name)
         {
-            var rt = new RenderTexture(res, res, 0, name[0] == 'd' ? RenderTextureFormat.ARGBFloat : RenderTextureFormat.RFloat) { filterMode = FilterMode.Bilinear, wrapMode = TextureWrapMode.Clamp, name = "WaterWakes sim " + name };
+            var rt = new RenderTexture(res, res, 0, name[0] == 'd' ? RenderTextureFormat.ARGBFloat : RenderTextureFormat.RFloat) { filterMode = FilterMode.Bilinear, wrapMode = TextureWrapMode.Clamp, name = "WakeSplashEffects sim " + name };
             rt.Create();
             RenderTexture prev = RenderTexture.active;
             RenderTexture.active = rt;
@@ -362,7 +362,7 @@ namespace WaterWakes
             {
                 if (hm != null)
                     hm.Release();
-                hm = new RenderTexture(res, res, 0, RenderTextureFormat.RFloat) { useMipMap = true, autoGenerateMips = false, filterMode = FilterMode.Trilinear, wrapMode = TextureWrapMode.Clamp, name = "WaterWakes sim height mips" };
+                hm = new RenderTexture(res, res, 0, RenderTextureFormat.RFloat) { useMipMap = true, autoGenerateMips = false, filterMode = FilterMode.Trilinear, wrapMode = TextureWrapMode.Clamp, name = "WakeSplashEffects sim height mips" };
                 hm.Create();
             }
             Graphics.Blit(h1, hm);
@@ -373,7 +373,7 @@ namespace WaterWakes
             {
                 if (vis == null)
                 {
-                    vis = new RenderTexture(256, 256, 0, RenderTextureFormat.ARGB32) { name = "WaterWakes sim view" };
+                    vis = new RenderTexture(256, 256, 0, RenderTextureFormat.ARGB32) { name = "WakeSplashEffects sim view" };
                     vis.Create();
                 }
                 mat.SetTexture("_H", h1);

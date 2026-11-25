@@ -1,18 +1,18 @@
-ship = Splash Wedge
+ship = Splash Cylinder
 version = 1.2.0
-description = A wedge for WaterWakes' splash tests: one ProceduralParts Ore tank, a triangular prism (2.5 m sides) 1.96 m long, lying edge down
+description = A plain cylinder for WakeSplashEffects' splash tests: one ProceduralParts Ore tank, 2.5 m across, 4 m long, standing on its end
 type = VAB
-size = 1.96,2.165,2.5
+size = 2.5,4,2.5
 PART
 {
 	part = proceduralTankOre_4294811080
 	partName = Part
-	pos = 0,2.0825,0
+	pos = 0,3,0
 	attPos = 0,0,0
-	attPos0 = 0,2.0825,0
-	rot = -0.5,-0.5,-0.5,0.5
+	attPos0 = 0,3,0
+	rot = 0,0,0,1
 	attRot = 0,0,0,1
-	attRot0 = -0.5,-0.5,-0.5,0.5
+	attRot0 = 0,0,0,1
 	mir = 1,1,1
 	symMethod = Mirror
 	autostrutMode = Off
@@ -34,7 +34,7 @@ PART
 		forceLegacyTextures = False
 		textureSet = Original
 		capTextureIndex = 0
-		shapeName = Polygon
+		shapeName = Cylinder
 		stagingEnabled = True
 		EVENTS
 		{
@@ -57,11 +57,10 @@ PART
 	}
 	MODULE
 	{
-		name = ProceduralShapePolygon
+		name = ProceduralShapeCylinder
 		isEnabled = True
-		cornerCount = 3
-		diameter = 2.16506
-		length = 1.96
+		diameter = 2.5
+		length = 4
 		stagingEnabled = True
 		EVENTS
 		{

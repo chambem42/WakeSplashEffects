@@ -5,7 +5,7 @@ using System.Linq;
 using System.Reflection;
 using UnityEngine;
 
-namespace WaterWakes
+namespace WakeSplashEffects
 {
     /// <summary>
     /// Scatterer's deferred ocean (0.09xx) lights its water from the flight reflection probe when the camera is near the
@@ -81,7 +81,7 @@ namespace WaterWakes
                     m.SetInt(AmbientId, want);
                     set[m] = want;
                     if (WakeSettings.Current.debugLog)
-                        Debug.Log($"[WaterWakes] Scatterer ocean ambient from the reflection probe {(want == 1 ? "on" : "off")}");
+                        Debug.Log($"[WakeSplashEffects] Scatterer ocean ambient from the reflection probe {(want == 1 ? "on" : "off")}");
                 }
                 foreach (Material m in set.Keys.Where(k => k == null).ToList())
                     set.Remove(m);
@@ -89,7 +89,7 @@ namespace WaterWakes
             catch (Exception e)
             {
                 failed = true;
-                Debug.LogWarning($"[WaterWakes] Scatterer ocean ambient fix off: {e.Message}");
+                Debug.LogWarning($"[WakeSplashEffects] Scatterer ocean ambient fix off: {e.Message}");
             }
         }
     }

@@ -1,11 +1,11 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-namespace WaterWakes
+namespace WakeSplashEffects
 {
     /// <summary>
     ///     The particles the mod has asked each of its particle systems for this game session, by kind (the system's name
-    ///     less "WaterWakes ": "foam", "skirt", "splash mist", ...), for tests and diagnostics: take a Snapshot before
+    ///     less "WakeSplashEffects ": "foam", "skirt", "splash mist", ...), for tests and diagnostics: take a Snapshot before
     ///     and after and compare. Counted as asked for: a system already full (its maxParticles) drops the rest.
     /// </summary>
     public static class WakeStats
@@ -22,7 +22,7 @@ namespace WaterWakes
                     gone.Add(k);
             foreach (ParticleSystem k in gone)
                 kinds.Remove(k);
-            string kind = name.StartsWith("WaterWakes ") ? name.Substring("WaterWakes ".Length) : name;
+            string kind = name.StartsWith("WakeSplashEffects ") ? name.Substring("WakeSplashEffects ".Length) : name;
             kinds[ps] = kind;
             if (!emitted.ContainsKey(kind))
                 emitted[kind] = 0;

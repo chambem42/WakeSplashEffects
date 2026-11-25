@@ -8,17 +8,17 @@ using System.Text;
 using KspTest;
 using UnityEngine;
 
-namespace WaterWakes.KspTests
+namespace WakeSplashEffects.KspTests
 {
     /// <summary>
     /// Bodies (crafts/generator/splash_crafts.py: ProceduralParts Ore tanks, their ore making their mass; most of one plan
     /// area, 4.91 m2 facing the water from above) dropped onto still water, once per mass and height: FAR's water slam
-    /// (its water model makes the force; read by reflection, FarWater) and the splash WaterWakes draws, beside what
+    /// (its water model makes the force; read by reflection, FarWater) and the splash WakeSplashEffects draws, beside what
     /// water-entry studies give for the same speed, size and mass, and beside each other.
     /// </summary>
     public static class SplashTests
     {
-        // the tests' mods besides the project's (WaterWakes.KspTests.Run: FAR, ProceduralParts, this mod): CustomProceduralParts
+        // the tests' mods besides the project's (WakeSplashEffects.KspTests.Run: FAR, ProceduralParts, this mod): CustomProceduralParts
         // (the Spine bodies) from its repository at a commit, built from source. To test a checkout, put its
         // GameData/CustomProceduralParts path here (or in KSPTEST_MODS)
         private const string Mods =
@@ -156,7 +156,7 @@ namespace WaterWakes.KspTests
         /// splash.csv (a row a drop); record=true: a video (frames/, drops.txt: each drop's first frame;
         /// impacts.txt: the frame each reaches the water, its mass, height and speed, to line the drops up side by side),
         /// the camera camDistance m (default 20) off, camPitch deg (default 3) down, aimed camAim m (default 4) above the
-        /// water where it falls. Recorded (with WaterWakes' particles by kind, splash.csv's n_ columns, and the frames a
+        /// water where it falls. Recorded (with WakeSplashEffects' particles by kind, splash.csv's n_ columns, and the frames a
         /// game second, fps; maxFps=N holds the frame rate to N), not asserted, but for the particles of its 4 t drop from
         /// 20 m (CheckCounts).
         /// </summary>
@@ -183,7 +183,7 @@ namespace WaterWakes.KspTests
 
         /// <summary>
         /// Splash_CylinderDrops' drops of an Apollo command module: the stock Mk1-3 pod and 2.5 m heat shield at Apollo's
-        /// size (crafts/Splash Apollo Pod.craft, mods/WaterWakesTests/ApolloPod.cfg: x1.564, 3.91 m across), hanging as
+        /// size (crafts/Splash Apollo Pod.craft, mods/WakeSplashEffectsTests/ApolloPod.cfg: x1.564, 3.91 m across), hanging as
         /// under its parachutes: capsuleTilt deg (default 27.5, Apollo's) off upright, its top and its heat shield's low edge
         /// leaning capsuleTiltAzimuth deg (default 40) from the camera's right toward the camera (Apollo 15's footage: down
         /// and right in the frame). A nominal splashdown: capsuleDrops=5.6@4.5 (5.6 t, 9.4 m/s at the water). Ballasted
@@ -414,7 +414,7 @@ namespace WaterWakes.KspTests
                     // (the tank's own velocity: the vessel's srf_velocity reads 0 once a floater has slowed, while it still moves)
                     Vector3 Vel() => tank.Rigidbody.velocity + (Vector3)Krakensbane.GetFrameVelocity();
                     Vector3 velWas = Vel();
-                    // (WaterWakes' particles from here to the end of the settle: each kind's count; and the frames drawn a game
+                    // (WakeSplashEffects' particles from here to the end of the settle: each kind's count; and the frames drawn a game
                     // second, which some of them depend on)
                     Dictionary<string, long> emittedBefore = WakeCounts.Snapshot();
                     int frameBefore = Time.frameCount;

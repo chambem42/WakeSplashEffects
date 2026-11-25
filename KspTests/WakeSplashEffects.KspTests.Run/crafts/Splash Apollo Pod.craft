@@ -1,6 +1,6 @@
 ship = Splash Apollo Pod
 version = 1.12.5
-description = The stock Mk1-3 pod and 2.5 m heat shield at an Apollo command module's size (3.91 m across) for WaterWakes' splash tests; Ore in the pod sets its mass
+description = The stock Mk1-3 pod and 2.5 m heat shield at an Apollo command module's size (3.91 m across) for WakeSplashEffects' splash tests; Ore in the pod sets its mass
 type = VAB
 size = 3.91,3.6,3.91
 steamPublishedFileId = 0

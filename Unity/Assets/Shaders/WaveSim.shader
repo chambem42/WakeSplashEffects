@@ -3,7 +3,7 @@
 // right: w^2 = g k), driven by the hulls' displacement (their waterline footprints x draft: water pushed down as a
 // footprint arrives, let back as it leaves), absorbed at its edges; and the foam its breaking crests leave.
 // Textures are RFloat, uv 0..1 across the square.
-Shader "WaterWakes/WaveSim"
+Shader "WakeSplashEffects/WaveSim"
 {
     Properties
     {

@@ -1,13 +1,13 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <Version>0.1.0</Version>
+    <Version>0.1.1</Version>
     <TargetFramework>net48</TargetFramework>
     <LangVersion>8.0</LangVersion>
-    <AssemblyName>WaterWakes</AssemblyName>
-    <RootNamespace>WaterWakes</RootNamespace>
+    <AssemblyName>WakeSplashEffects</AssemblyName>
+    <RootNamespace>WakeSplashEffects</RootNamespace>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
-    <OutputPath>..\GameData\WaterWakes\Plugins\</OutputPath>
+    <OutputPath>..\GameData\WakeSplashEffects\Plugins\</OutputPath>
     <DebugType>portable</DebugType>
     <!-- KSP's Managed folder. Override with -p:KspManaged=... -->
     <KspManaged Condition="'$(KspManaged)' == ''">C:\Program Files (x86)\Steam\steamapps\common\Kerbal Space Program\KSP_x64_Data\Managed\</KspManaged>

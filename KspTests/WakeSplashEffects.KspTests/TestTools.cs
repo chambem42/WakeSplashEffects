@@ -7,7 +7,7 @@ using System.Reflection;
 using KspTest;
 using UnityEngine;
 
-namespace WaterWakes.KspTests
+namespace WakeSplashEffects.KspTests
 {
     /// <summary>
     /// The water tests' helpers (as FAR's KspTests have them: FarWaterTools, BoatTests.Noon, PlaningVideoTests.Recorder):
@@ -528,7 +528,7 @@ namespace WaterWakes.KspTests
     }
 
     /// <summary>
-    /// The particles WaterWakes has emitted, by kind (WakeStats.Snapshot: "foam", "skirt", "splash mist", ...), read by
+    /// The particles WakeSplashEffects has emitted, by kind (WakeStats.Snapshot: "foam", "skirt", "splash mist", ...), read by
     /// reflection like FarWater; empty without the mod (or a build without WakeStats).
     /// </summary>
     internal static class WakeCounts
@@ -545,7 +545,7 @@ namespace WaterWakes.KspTests
         {
             if (snapshot == null)
             {
-                Type t = AssemblyLoader.loadedAssemblies.Select(a => a.assembly.GetType("WaterWakes.WakeStats")).FirstOrDefault(x => x != null);
+                Type t = AssemblyLoader.loadedAssemblies.Select(a => a.assembly.GetType("WakeSplashEffects.WakeStats")).FirstOrDefault(x => x != null);
                 snapshot = t?.GetMethod("Snapshot", BindingFlags.Public | BindingFlags.Static);
                 if (snapshot == null)
                     return new Dictionary<string, long>();

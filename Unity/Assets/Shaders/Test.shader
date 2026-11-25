@@ -1,5 +1,5 @@
 // Build/load check: one pass returning a constant colour.
-Shader "WaterWakes/Test"
+Shader "WakeSplashEffects/Test"
 {
     SubShader
     {

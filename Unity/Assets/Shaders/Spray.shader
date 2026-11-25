@@ -3,7 +3,7 @@
 // edge (about a pixel wide), so a blob stays sharp-edged and breaks up into ragged streaks as it thins, rather than
 // going soft and see-through. Lit by the sun: slightly shaded where thick, glowing where thin with the sun behind it.
 // Custom vertex streams: TEXCOORD0 = (uv, age 0..1, stable random 0..1). Global _WW_SunDir (world, towards the sun).
-Shader "WaterWakes/Spray"
+Shader "WakeSplashEffects/Spray"
 {
     Properties
     {

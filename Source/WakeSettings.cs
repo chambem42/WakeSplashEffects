@@ -1,11 +1,11 @@
 using System.IO;
 using UnityEngine;
 
-namespace WaterWakes
+namespace WakeSplashEffects
 {
     /// <summary>
-    /// Tunables. Defaults here, then any WATERWAKES cfg node (GameDatabase), then the player's saved settings
-    /// (GameData/WaterWakes/PluginData/settings.cfg, written by the in-game window). One instance for the game session;
+    /// Tunables. Defaults here, then any WAKESPLASHEFFECTS cfg node (GameDatabase), then the player's saved settings
+    /// (GameData/WakeSplashEffects/PluginData/settings.cfg, written by the in-game window). One instance for the game session;
     /// the window edits it live.
     /// </summary>
     public class WakeSettings
@@ -60,7 +60,7 @@ namespace WaterWakes
         [Persistent] public float ringLife = 3f;          // the ripples last this many times as long as the breaking crest
         [Persistent] public float ringWavelength = 1f;    // x the ripples' wavelength (0.6 D + 0.15 x the ring's radius)
         [Persistent] public bool hideStockSplash = true; // stock's splash column (FXMonger) silenced: its sound kept, its particles off
-        [Persistent] public bool splashSounds = true;    // WaterWakes' splash sounds (WakeSounds): stock's boom for slams KSP doesn't hear, a breach's pour, the spray's hiss
+        [Persistent] public bool splashSounds = true;    // WakeSplashEffects' splash sounds (WakeSounds): stock's boom for slams KSP doesn't hear, a breach's pour, the spray's hiss
         [Persistent] public float splashVolume = 1f;    // x KSP's ship volume
         [Persistent] public float hullSlamSpeed = 2.5f;  // m/s: a hull going in this fast by its own motion (its waterline's fastest point) slams, however deep
         [Persistent] public float submergedFade = 0.4f;  // m: a part wholly under water makes less wake the deeper its top, none from here
@@ -130,13 +130,13 @@ namespace WaterWakes
 
         public static WakeSettings Current => current ?? (current = Load());
 
-        public static string SavePath => Path.Combine(KSPUtil.ApplicationRootPath, "GameData", "WaterWakes", "PluginData", "settings.cfg");
+        public static string SavePath => Path.Combine(KSPUtil.ApplicationRootPath, "GameData", "WakeSplashEffects", "PluginData", "settings.cfg");
 
         /// <summary>Defaults and the cfg nodes only (the window's Defaults button).</summary>
         public static WakeSettings Configured()
         {
             var s = new WakeSettings();
-            foreach (ConfigNode n in GameDatabase.Instance.GetConfigNodes("WATERWAKES"))
+            foreach (ConfigNode n in GameDatabase.Instance.GetConfigNodes("WAKESPLASHEFFECTS"))
                 ConfigNode.LoadObjectFromConfig(s, n);
             return s;
         }
@@ -147,7 +147,7 @@ namespace WaterWakes
             if (File.Exists(SavePath))
             {
                 ConfigNode root = ConfigNode.Load(SavePath);
-                ConfigNode n = root?.GetNode("WATERWAKES");
+                ConfigNode n = root?.GetNode("WAKESPLASHEFFECTS");
                 if (n != null)
                     ConfigNode.LoadObjectFromConfig(s, n);
             }
@@ -160,11 +160,11 @@ namespace WaterWakes
         {
             Directory.CreateDirectory(Path.GetDirectoryName(SavePath));
             ConfigNode n = ConfigNode.CreateConfigFromObject(this);
-            n.name = "WATERWAKES";
+            n.name = "WAKESPLASHEFFECTS";
             var root = new ConfigNode();
             root.AddNode(n);
             root.Save(SavePath);
-            Debug.Log($"[WaterWakes] settings saved to {SavePath}");
+            Debug.Log($"[WakeSplashEffects] settings saved to {SavePath}");
         }
     }
 }

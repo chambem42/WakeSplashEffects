@@ -1,6 +1,6 @@
 // Foam particles on the water (alpha blended, like Legacy Particles/Alpha Blended at tint 0.5): each patch eroded by its
 // age (WakeFoam.cginc), so it thins from dense white to lace continuously instead of in texture-sheet steps.
-Shader "WaterWakes/Foam"
+Shader "WakeSplashEffects/Foam"
 {
     Properties
     {

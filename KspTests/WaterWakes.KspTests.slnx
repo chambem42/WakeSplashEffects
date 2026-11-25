@@ -1,4 +1,0 @@
-<Solution>
-  <Project Path="WaterWakes.KspTests/WaterWakes.KspTests.csproj" />
-  <Project Path="WaterWakes.KspTests.Run/WaterWakes.KspTests.Run.csproj" />
-</Solution>

@@ -6,7 +6,7 @@
 // particle system's share below (the upwell's bubbles mostly, the wake's foam mostly on top).
 // B (the near map only: the far one has two channels): the share of R that is a splash's whitewater (_Churn), which
 // the ocean pass draws dense, white and ropey instead of as the wake's lace.
-Shader "WaterWakes/FoamMap"
+Shader "WakeSplashEffects/FoamMap"
 {
     Properties
     {

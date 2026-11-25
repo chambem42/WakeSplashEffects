@@ -1,6 +1,6 @@
 name: Tests
 
-# The in-game tests (KspTests/WaterWakes.KspTests.Run) in KSP 1.12.5 on GitHub's Windows and Linux runners, side by
+# The in-game tests (KspTests/WakeSplashEffects.KspTests.Run) in KSP 1.12.5 on GitHub's Windows and Linux runners, side by
 # side, through KspTest's reusable workflow: the game from KspTest's game broker (or the environment ksp-game:
 # KSP_GAME_KEY, KSP_GAME_TOKEN, KSP_GAME_REPO; with neither the tests are skipped), a fork's pull request only once
 # someone with write access has reviewed it and labelled it run-ingame. The mod is built against the game's own
@@ -48,8 +48,8 @@ jobs:
       id-token: write
     secrets: inherit
     with:
-      test-project: KspTests/WaterWakes.KspTests.Run
-      title: WaterWakes in-game tests
+      test-project: KspTests/WakeSplashEffects.KspTests.Run
+      title: WakeSplashEffects in-game tests
       legs: '["windows", "linux"]'
       # (each leg's tests dealt to 3 jobs: KSP under Windows' software renderer commits ~15 GB, and a session of five
       # drops outgrew the runner's commit limit by the third)

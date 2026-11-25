@@ -6,7 +6,7 @@ using UnityEngine;
 using UnityEngine.Rendering;
 using Random = UnityEngine.Random;
 
-namespace WaterWakes
+namespace WakeSplashEffects
 {
     /// <summary>
     /// Bow spray, mist and a foam trail for every loaded craft moving through the ocean. Each frame each craft's parts are
@@ -216,7 +216,7 @@ namespace WaterWakes
             return Mathf.SmoothStep(0, 1, Mathf.InverseLerp(0.6f * k, k, speed));
         }
 
-        /// <summary>The foam particles use WaterWakes/Foam (age-eroded patches; the foam map reads the same streams).</summary>
+        /// <summary>The foam particles use WakeSplashEffects/Foam (age-eroded patches; the foam map reads the same streams).</summary>
         public bool CustomFoam { get; private set; }
 
         // a part's submerged volume from frame to frame: its rate over its waterline area is the speed it enters or leaves at
@@ -338,7 +338,7 @@ namespace WaterWakes
         }
         // the splash's foam (crisp radial streaks; never painted into the ocean), in a frame of its own (z up, y SplashRef)
         private ParticleSystem splashFoam;
-        // the skirt's and the sheet's look: faded soft blobs (the legacy shader) or eroded crisp ones (WaterWakes/Spray)
+        // the skirt's and the sheet's look: faded soft blobs (the legacy shader) or eroded crisp ones (WakeSplashEffects/Spray)
         private Material skirtSoft, sheetSoft, skirtCrisp, sheetCrisp;
         private ParticleSystem slamSpray;   // a hull slam's (and a breach's shedding) spray: clouds of droplets (DropCloudTexture)
         private int crispApplied = -1;
@@ -364,7 +364,7 @@ namespace WaterWakes
                 r.sharedMaterial = c == 1 ? sharp : soft;
                 r.SetActiveVertexStreams(c == 1 ? AgedStreams : SoftStreams);
             }
-            Debug.Log($"[WaterWakes] spray look {(c == 1 ? "crisp" : "soft")}");
+            Debug.Log($"[WakeSplashEffects] spray look {(c == 1 ? "crisp" : "soft")}");
         }
 
         // the splash foam frame's y: the body's axis on the water's plane (fixed while the frame stays put)
@@ -726,17 +726,17 @@ namespace WaterWakes
             Shader sh = FindShader("Legacy Shaders/Particles/Alpha Blended", "Particles/Alpha Blended", "KSP/Particles/Alpha Blended");
             if (sh == null)
             {
-                Debug.LogError("[WaterWakes] no particle shader found; off");
+                Debug.LogError("[WakeSplashEffects] no particle shader found; off");
                 enabled = false;
                 return;
             }
-            Debug.Log($"[WaterWakes] shader {sh.name}");
+            Debug.Log($"[WakeSplashEffects] shader {sh.name}");
 
-            // foam: with WaterWakes/Foam each patch erodes continuously with its age (custom vertex streams: uv, age,
+            // foam: with WakeSplashEffects/Foam each patch erodes continuously with its age (custom vertex streams: uv, age,
             // random); without it, a texture sheet of ageing stages (which the legacy shader steps through, not blends)
-            Shader foamSh = WakeShaders.Get("WaterWakes/Foam");
+            Shader foamSh = WakeShaders.Get("WakeSplashEffects/Foam");
             CustomFoam = foamSh != null;
-            foam = Make("WaterWakes foam", CustomFoam ? new Material(foamSh) { mainTexture = FoamAtlas() } : Mat(sh, FoamTexture()), 30000, true);
+            foam = Make("WakeSplashEffects foam", CustomFoam ? new Material(foamSh) { mainTexture = FoamAtlas() } : Mat(sh, FoamTexture()), 30000, true);
             foamFrame = foam.transform;
             {
                 var fm = foam.main;
@@ -768,7 +768,7 @@ namespace WaterWakes
                     tsa.frameOverTime = new ParticleSystem.MinMaxCurve(1f, new AnimationCurve(new Keyframe(0, 0), new Keyframe(0.12f, 0.22f),
                                                                                               new Keyframe(0.45f, 0.62f), new Keyframe(1, 0.999f)));
                 }
-                Debug.Log($"[WaterWakes] foam shader {(CustomFoam ? foamSh.name : sh.name + " (texture sheet)")}");
+                Debug.Log($"[WakeSplashEffects] foam shader {(CustomFoam ? foamSh.name : sh.name + " (texture sheet)")}");
                 // in at once (else a wide hull passes over its bow foam before it shows), then fading fast: the patches grow
                 // ~7x in area and overlap more as they age, so each must fade much more than the foam should
                 var col = foam.colorOverLifetime;
@@ -788,7 +788,7 @@ namespace WaterWakes
                 mat.SetFloat("_Bright", 1.2f);
                 mat.SetFloat("_Under", 0.55f);
                 mat.SetFloat("_Churn", 1);   // (painted as whitewater, not the wake's lace: OceanFoam's Whitewater)
-                splashFoam = Make("WaterWakes splash foam", mat, 8000, true);
+                splashFoam = Make("WakeSplashEffects splash foam", mat, 8000, true);
                 var fm = splashFoam.main;
                 fm.startSize3D = true;
                 var sol = splashFoam.sizeOverLifetime;
@@ -812,7 +812,7 @@ namespace WaterWakes
                 um.SetFloat("_Crisp", 0.85f);
                 um.SetFloat("_Bright", 1.1f);
                 um.SetFloat("_Under", 1f);   // (bubbles welling up: mostly under the surface)
-                upwell = Make("WaterWakes upwell", um, 4000, true);
+                upwell = Make("WakeSplashEffects upwell", um, 4000, true);
                 var um2 = upwell.main;
                 um2.startSize3D = true;
                 var usol = upwell.sizeOverLifetime;
@@ -829,7 +829,7 @@ namespace WaterWakes
             }
 
             // droplets: each particle a loose cluster of fine drops (one of four), barely streaked by its flight
-            spray = Make("WaterWakes spray", Mat(sh, DropletTexture(), true), 25000, false);
+            spray = Make("WakeSplashEffects spray", Mat(sh, DropletTexture(), true), 25000, false);
             {
                 var sol = spray.sizeOverLifetime;
                 sol.enabled = true;
@@ -845,7 +845,7 @@ namespace WaterWakes
                 r.lengthScale = 1f;
             }
             // the spray sheet: ragged torn blobs of water (one of four), spreading and thinning as they fly
-            sheet = Make("WaterWakes sheet", Mat(sh, SheetTexture(), true), 12000, false);
+            sheet = Make("WakeSplashEffects sheet", Mat(sh, SheetTexture(), true), 12000, false);
             {
                 var sol = sheet.sizeOverLifetime;
                 sol.enabled = true;
@@ -868,7 +868,7 @@ namespace WaterWakes
             // off a capsule, launched at ~55 m/s, 4 m out in 0.1 s, 6.5 in 0.2, 8.3 in 0.3, 10.9 in 0.5), so they can hang
             // on as long as Apollo's white disc without flying further
             // (smooth and streaky: soft blobs streaked along their length, stretched along their flight)
-            skirt = Make("WaterWakes skirt", Mat(sh, StreakTexture(), true), 16000, false);
+            skirt = Make("WakeSplashEffects skirt", Mat(sh, StreakTexture(), true), 16000, false);
             {
                 var sol = skirt.sizeOverLifetime;
                 sol.enabled = true;
@@ -896,7 +896,7 @@ namespace WaterWakes
             // crisp sheets: the skirt's and the sheet's blobs eroded by their fading alpha and age instead of faded
             skirtSoft = skirt.GetComponent<ParticleSystemRenderer>().sharedMaterial;
             sheetSoft = sheet.GetComponent<ParticleSystemRenderer>().sharedMaterial;
-            Shader spraySh = WakeShaders.Get("WaterWakes/Spray");
+            Shader spraySh = WakeShaders.Get("WakeSplashEffects/Spray");
             if (spraySh != null)
             {
                 Texture2D et = ErodeTexture();
@@ -920,7 +920,7 @@ namespace WaterWakes
                 dm.SetVector("_Erode", new Vector4(0.06f, 0.55f, 0.45f, 0.6f));
                 dm.SetFloat("_Bright", 1.15f);
                 TestDepthByHand(dm);
-                slamSpray = Make("WaterWakes slam spray", dm, 16000, false);
+                slamSpray = Make("WakeSplashEffects slam spray", dm, 16000, false);
                 var sol = slamSpray.sizeOverLifetime;
                 sol.enabled = true;
                 sol.size = new ParticleSystem.MinMaxCurve(1f, new AnimationCurve(new Keyframe(0, 0.6f), new Keyframe(0.3f, 1.1f), new Keyframe(1, 1.8f)));
@@ -951,7 +951,7 @@ namespace WaterWakes
                 cm.SetFloat("_Bright", 1.1f);
                 cm.SetFloat("_Fade", 0.6f);
                 TestDepthByHand(cm);
-                splashCloud = Make("WaterWakes splash cloud", cm, 12000, false);
+                splashCloud = Make("WakeSplashEffects splash cloud", cm, 12000, false);
                 var csol = splashCloud.sizeOverLifetime;
                 csol.enabled = true;
                 csol.size = new ParticleSystem.MinMaxCurve(1f, new AnimationCurve(new Keyframe(0, 0.5f), new Keyframe(0.25f, 1.1f), new Keyframe(1, 2.3f)));
@@ -975,13 +975,13 @@ namespace WaterWakes
                 cr.lengthScale = 1.1f;
                 cr.SetActiveVertexStreams(AgedStreams);
             }
-            Debug.Log($"[WaterWakes] spray shader {(spraySh != null ? spraySh.name : "none (soft only)")}, splash foam {(splashFoam != null ? "crisp" : "in the main foam")}");
+            Debug.Log($"[WakeSplashEffects] spray shader {(spraySh != null ? spraySh.name : "none (soft only)")}, splash foam {(splashFoam != null ? "crisp" : "in the main foam")}");
             ApplySprayLook(Cfg.crispSpray);
 
             // the haze: soft puffs added (glowing) over the sheet, slowed by the air, growing, fading
             {
                 Shader add = FindShader("Legacy Shaders/Particles/Additive", "Particles/Additive", "KSP/Particles/Additive");
-                haze = Make("WaterWakes haze", Mat(add != null ? add : sh, MistTexture(), true), 6000, false);
+                haze = Make("WakeSplashEffects haze", Mat(add != null ? add : sh, MistTexture(), true), 6000, false);
                 var hsol = haze.sizeOverLifetime;
                 hsol.enabled = true;
                 hsol.size = new ParticleSystem.MinMaxCurve(1f, new AnimationCurve(new Keyframe(0, 0.6f), new Keyframe(0.3f, 1.2f), new Keyframe(1, 2.0f)));
@@ -1000,11 +1000,11 @@ namespace WaterWakes
                 var hrot = haze.rotationOverLifetime;
                 hrot.enabled = true;
                 hrot.z = new ParticleSystem.MinMaxCurve(-0.3f, 0.3f);
-                Debug.Log($"[WaterWakes] haze shader {(add != null ? add.name : sh.name + " (no additive found)")}");
+                Debug.Log($"[WakeSplashEffects] haze shader {(add != null ? add.name : sh.name + " (no additive found)")}");
             }
 
             // a hard splash's mist: soft puffs slowed by the air to a near stop, swelling, hanging seconds, at any height
-            splashMist = Make("WaterWakes splash mist", Mat(sh, PuffTexture(), true), 3000, false);
+            splashMist = Make("WakeSplashEffects splash mist", Mat(sh, PuffTexture(), true), 3000, false);
             {
                 var sol = splashMist.sizeOverLifetime;
                 sol.enabled = true;
@@ -1028,7 +1028,7 @@ namespace WaterWakes
             }
 
             // mist: its opacity set each frame from each puff's height (Mist()); the age fade only eases it in and out
-            mist = Make("WaterWakes mist", Mat(sh, MistTexture(), true), 8000, false);
+            mist = Make("WakeSplashEffects mist", Mat(sh, MistTexture(), true), 8000, false);
             {
                 var sol = mist.sizeOverLifetime;
                 sol.enabled = true;
@@ -1867,13 +1867,13 @@ namespace WaterWakes
                 var cs = new System.Text.StringBuilder();
                 foreach (Cut c in cuts)
                     cs.Append($" <{c.pf0:F1}..{c.pf1:F1} roof {c.rf0:F1}..{c.rf1:F1} {c.rlo[Bins / 2]:F1}..{c.rhi[Bins / 2]:F1} line {c.line} s {c.sMin:F1}..{c.sMax:F1} front {c.lo[Bins - 1]:F1}..{c.hi[Bins - 1]:F1} mid {c.lo[Bins / 2]:F1}..{c.hi[Bins / 2]:F1} w{c.w:F2}>");
-                Debug.Log($"[WaterWakes] cuts:{cs}");
+                Debug.Log($"[WakeSplashEffects] cuts:{cs}");
                 var far = new System.Text.StringBuilder();
                 foreach (Part p in v.parts)
                     if (p.rb != null)
                         far.Append($" {p.partInfo.name}: rb CoM {(p.rb.worldCenterOfMass - p.transform.position).magnitude:F1} m off, {(p.rb.worldCenterOfMass - origin).magnitude:F1} m from vessel CoM, mass {p.rb.mass:F1};");
-                Debug.Log($"[WaterWakes] {v.vesselName} CoM alt {altO:F1} (vessel alt {v.altitude:F1}), root {(v.rootPart.transform.position - origin).magnitude:F1} m away:{far}");
-                Debug.Log($"[WaterWakes] {v.vesselName}: {V:F1} m/s, load {st.load:F2} (draft {draftMax:F2} / rest {st.restDraft:F2}), area {st.area:F2} / rest {st.restArea:F2}, planing {planing:F2}, strength {strength:F2}; " +
+                Debug.Log($"[WakeSplashEffects] {v.vesselName} CoM alt {altO:F1} (vessel alt {v.altitude:F1}), root {(v.rootPart.transform.position - origin).magnitude:F1} m away:{far}");
+                Debug.Log($"[WakeSplashEffects] {v.vesselName}: {V:F1} m/s, load {st.load:F2} (draft {draftMax:F2} / rest {st.restDraft:F2}), area {st.area:F2} / rest {st.restArea:F2}, planing {planing:F2}, strength {strength:F2}; " +
                           $"{cuts.Count} wet parts, {hulls.Count} hulls{sb}; emitted foam {emittedFoam} spray {emittedSpray} (splash {emittedSplash}) mist {emittedMist}; " +
                           $"alive foam {foam.particleCount} spray {spray.particleCount} mist {mist.particleCount}");
                 emittedFoam = emittedSpray = emittedMist = emittedSplash = 0;
@@ -2156,7 +2156,7 @@ namespace WaterWakes
             int n = Mathf.Min(Count(dt * rate * (sp.entry ? 1.4f : 1) * crownShare), sp.entry ? 400 : 200);
             float big = Mathf.Clamp(Mathf.Sqrt(Mathf.Sqrt(sp.L * sp.B) / 2), 0.7f, 3f);   // (bigger blobs from a bigger splash, not ever more of them)
             if (SplashDebug && sp.since > 0.15f && sp.since < 0.6f)
-                Debug.Log($"[WaterWakes] dbg splash t {sp.since:F2} fc {sp.fc:F2} sc {sp.sc:F2} L {sp.L:F2} B {sp.B:F2} wl {sp.wl:F2} speed {sp.speed:F1} outOf {sp.outOf} entry {sp.entry} domed {sp.domed} n {n} vel {sp.vel.magnitude:F1}");
+                Debug.Log($"[WakeSplashEffects] dbg splash t {sp.since:F2} fc {sp.fc:F2} sc {sp.sc:F2} L {sp.L:F2} B {sp.B:F2} wl {sp.wl:F2} speed {sp.speed:F1} outOf {sp.outOf} entry {sp.entry} domed {sp.domed} n {n} vel {sp.vel.magnitude:F1}");
             for (int i = 0; i < n; i++)
             {
                 float th = Random.value * 2 * Mathf.PI, r = sp.outOf ? Mathf.Sqrt(Random.value) : Random.Range(0.75f, 1.05f);
@@ -2296,7 +2296,7 @@ namespace WaterWakes
                 float opacity = Mathf.Lerp(0.3f, 1f, Mathf.Clamp01((sp.eU - 5f) / 4f));
                 int ns = Mathf.Min(Count(sp.skirtBlunt * 150 * (1 + lean) * fresh * fresh * later * SkirtEnergy(sp.eU) * cfg.skirtAmount * cfg.intensity), 1800);
                 if (cfg.debugLog && sp.skirtArea > 0)
-                    Debug.Log($"[WaterWakes] skirt: {ns} blobs, U {sp.eU:F1} m/s, D {sp.eD:F2} m, spread {sp.skirtSpread:F1} m/s, sheet {vs:F1} m/s, sweep {sp.sweep} ({lean:F2}), over open water {fresh:F2}, blunt {blunt:F2}");
+                    Debug.Log($"[WakeSplashEffects] skirt: {ns} blobs, U {sp.eU:F1} m/s, D {sp.eD:F2} m, spread {sp.skirtSpread:F1} m/s, sheet {vs:F1} m/s, sweep {sp.sweep} ({lean:F2}), over open water {fresh:F2}, blunt {blunt:F2}");
                 if (ns > 0 && splashVessel != null && !holes.Exists(h => h.v == splashVessel && Time.time - h.t0 < 3))
                 {
                     holes.Add(new Hole { v = splashVessel, r = 0.65f * sp.eD, t0 = Time.time, shift = (f * sp.sweep.x + s * sp.sweep.y) * 0.65f * sp.eD });
@@ -2517,7 +2517,7 @@ namespace WaterWakes
         private static Texture2D DropCloudTexture()
         {
             const int T = 128;
-            var tex = new Texture2D(2 * T, 2 * T, TextureFormat.RGBA32, true, true) { wrapMode = TextureWrapMode.Clamp, name = "WaterWakes drop cloud" };
+            var tex = new Texture2D(2 * T, 2 * T, TextureFormat.RGBA32, true, true) { wrapMode = TextureWrapMode.Clamp, name = "WakeSplashEffects drop cloud" };
             var h = new float[4 * T * T];
             var g = new float[4 * T * T];
             var rnd = new System.Random(9173);
@@ -2591,7 +2591,7 @@ namespace WaterWakes
             int ns = Mathf.Min(Count(dt * grow * 7f * strong * cfg.skirtAmount * cfg.intensity), 280);
             float big = Mathf.Clamp(Mathf.Sqrt(sp.B) * 0.5f, 0.8f, 2.5f);
             if (SplashDebug || cfg.debugLog)
-                Debug.Log($"[WaterWakes] hull slam: U {U:F1} m/s, waterline growing {sp.growL:F1} / {sp.growB:F1} m/s, sheet {vs:F1} m/s, L {sp.L:F1} B {sp.B:F1}, {ns} blobs");
+                Debug.Log($"[WakeSplashEffects] hull slam: U {U:F1} m/s, waterline growing {sp.growL:F1} / {sp.growB:F1} m/s, sheet {vs:F1} m/s, L {sp.L:F1} B {sp.B:F1}, {ns} blobs");
             // (the air and water trapped under the falling hull escape ahead of the closing contact line: forward and out
             // to the sides, strongest at the front of the stretch, where the line is sweeping; a share as a jet straight
             // out ahead of the nose, fanning)
@@ -2950,7 +2950,7 @@ namespace WaterWakes
             wt.impacted = true;
             float U = Mathf.Min(wt.U, cfg.splashMaxSpeed), D = Mathf.Max(0.2f, Mathf.Sqrt(wt.LB));
             if (cfg.debugLog)
-                Debug.Log($"[WaterWakes] entry: {p.partInfo?.name} at {U:F1} m/s, D {D:F2} m, waterline spread up to {wt.spreadMax:F1} m/s ({wt.spreadMax / Mathf.Max(U, 0.1f):F2} U), low side {wt.tilt}, flat {wt.flat:F2}");   // (an ellipse's area: pi/4 L B = pi/4 D^2)
+                Debug.Log($"[WakeSplashEffects] entry: {p.partInfo?.name} at {U:F1} m/s, D {D:F2} m, waterline spread up to {wt.spreadMax:F1} m/s ({wt.spreadMax / Mathf.Max(U, 0.1f):F2} U), low side {wt.tilt}, flat {wt.flat:F2}");   // (an ellipse's area: pi/4 L B = pi/4 D^2)
             float fr = U * U / (9.81f * D);
             wt.sealAt = fr > 11 ? 5.75f * D / Mathf.Max(U, 0.1f) : float.MaxValue;
             if (U < Mathf.Max(3f, cfg.splashMinSpeed) || fr < 1)
@@ -3034,7 +3034,7 @@ namespace WaterWakes
                             hgt += hh;
                         }
                         if (near > 0)
-                            Debug.Log($"[WaterWakes] dbg near-axis at 0.6 s: {name} {near} of {cnt}, age {age / near:F2} s, up {vup / near:F1} m/s, out {vout / near:F1}, size {size / near:F2}, height {hgt / near:F1} m");
+                            Debug.Log($"[WakeSplashEffects] dbg near-axis at 0.6 s: {name} {near} of {cnt}, age {age / near:F2} s, up {vup / near:F1} m/s, out {vout / near:F1}, size {size / near:F2}, height {hgt / near:F1} m");
                     }
                 }
                 if (!im.jetted && im.t >= im.jetAt)
@@ -3052,7 +3052,7 @@ namespace WaterWakes
                     im.strength = Mathf.Clamp01(((float)travel / im.D - 1.8f) / 0.5f);
                     float h = cfg.jetHeight * 0.47f * im.U * im.U / (2 * 9.81f) * (1 + 1.6f * Mathf.Max(0, slow - 0.06f)) *
                               Mathf.Clamp(1 + 6 * Mathf.Max(0, sink - 0.2f), 1, 1.9f) * (0.5f + 0.5f * im.strength);
-                    Debug.Log($"[WaterWakes] jet: entry {im.U:F1} m/s, D {im.D:F2} m, at {im.jetAt:F2} s, sank {travel:F1} m ({travel / im.D:F1} D), " +
+                    Debug.Log($"[WakeSplashEffects] jet: entry {im.U:F1} m/s, D {im.D:F2} m, at {im.jetAt:F2} s, sank {travel:F1} m ({travel / im.D:F1} D), " +
                               $"sinking {sink:F2} U then: {h:F1} m high, {im.strength:F2} of full");
                     if (im.strength <= 0 || h < 0.3f)
                     {
@@ -3307,7 +3307,7 @@ namespace WaterWakes
         }
 
         // Scatterer's forward ocean (ForwardOceanHook) writes the camera's depth buffer, which would cut the puffs hard
-        // along the waves: there they get WaterWakes/SoftParticle (the same look) testing depth by hand (WakeOcean.cginc)
+        // along the waves: there they get WakeSplashEffects/SoftParticle (the same look) testing depth by hand (WakeOcean.cginc)
         private static bool OverForwardOcean => ForwardOceanHook.Patched && ForwardOceanHook.Mat != null;
 
         internal static void TestDepthByHand(Material m)
@@ -3321,7 +3321,7 @@ namespace WaterWakes
 
         private static Material Mat(Shader sh, Texture2D tex, bool soft = false)
         {
-            Shader sp = soft && OverForwardOcean ? WakeShaders.Get("WaterWakes/SoftParticle") : null;
+            Shader sp = soft && OverForwardOcean ? WakeShaders.Get("WakeSplashEffects/SoftParticle") : null;
             if (sp != null)
             {
                 bool additive = sh.name.Contains("Additive");
@@ -3350,7 +3350,7 @@ namespace WaterWakes
 
         private static Mesh Quad()
         {
-            var m = new Mesh { name = "WaterWakes quad" };
+            var m = new Mesh { name = "WakeSplashEffects quad" };
             m.vertices = new[] { new Vector3(-0.5f, -0.5f, 0), new Vector3(0.5f, -0.5f, 0), new Vector3(0.5f, 0.5f, 0), new Vector3(-0.5f, 0.5f, 0) };
             m.uv = new[] { new Vector2(0, 0), new Vector2(1, 0), new Vector2(1, 1), new Vector2(0, 1) };
             m.normals = new[] { Vector3.back, Vector3.back, Vector3.back, Vector3.back };
@@ -3376,7 +3376,7 @@ namespace WaterWakes
         {
             const int T = 128;
             int W = T * FoamStages, H = T * FoamVariants;
-            var tex = new Texture2D(W, H, TextureFormat.RGBA32, true) { wrapMode = TextureWrapMode.Clamp, name = "WaterWakes foam" };
+            var tex = new Texture2D(W, H, TextureFormat.RGBA32, true) { wrapMode = TextureWrapMode.Clamp, name = "WakeSplashEffects foam" };
             var px = new Color32[W * H];
             const int G = 6;   // bubble cells across a patch
             var cell = new Vector2[(G + 2) * (G + 2)];
@@ -3433,12 +3433,12 @@ namespace WaterWakes
             return tex;
         }
 
-        // WaterWakes/Foam's atlas (WakeFoam.cginc): 2x2 patch variants, R fbm, G bubble-cell walls, B a ragged round mask,
+        // WakeSplashEffects/Foam's atlas (WakeFoam.cginc): 2x2 patch variants, R fbm, G bubble-cell walls, B a ragged round mask,
         // A a grey mottle; the shader erodes R by the patch's age
         private static Texture2D FoamAtlas()
         {
             const int T = 256, G = 9;   // px per variant; bubble cells across a patch
-            var tex = new Texture2D(2 * T, 2 * T, TextureFormat.RGBA32, true) { wrapMode = TextureWrapMode.Clamp, name = "WaterWakes foam atlas" };
+            var tex = new Texture2D(2 * T, 2 * T, TextureFormat.RGBA32, true) { wrapMode = TextureWrapMode.Clamp, name = "WakeSplashEffects foam atlas" };
             var px = new Color32[4 * T * T];
             var cell = new Vector2[(G + 2) * (G + 2)];
             for (int var = 0; var < 4; var++)
@@ -3487,7 +3487,7 @@ namespace WaterWakes
         private static Texture2D DropletTexture()
         {
             const int T = 64;
-            var tex = new Texture2D(2 * T, 2 * T, TextureFormat.RGBA32, true) { wrapMode = TextureWrapMode.Clamp, name = "WaterWakes droplets" };
+            var tex = new Texture2D(2 * T, 2 * T, TextureFormat.RGBA32, true) { wrapMode = TextureWrapMode.Clamp, name = "WakeSplashEffects droplets" };
             var a = new float[4 * T * T];
             for (int var = 0; var < 4; var++)
             {
@@ -3518,7 +3518,7 @@ namespace WaterWakes
         private static Texture2D SheetTexture()
         {
             const int T = 96;
-            var tex = new Texture2D(2 * T, 2 * T, TextureFormat.RGBA32, true) { wrapMode = TextureWrapMode.Clamp, name = "WaterWakes sheet" };
+            var tex = new Texture2D(2 * T, 2 * T, TextureFormat.RGBA32, true) { wrapMode = TextureWrapMode.Clamp, name = "WakeSplashEffects sheet" };
             var px = new Color32[4 * T * T];
             for (int var = 0; var < 4; var++)
             {
@@ -3559,7 +3559,7 @@ namespace WaterWakes
 
         private static Texture2D DotTexture(int N, float hard)
         {
-            var tex = new Texture2D(N, N, TextureFormat.RGBA32, true) { wrapMode = TextureWrapMode.Clamp, name = "WaterWakes dot" };
+            var tex = new Texture2D(N, N, TextureFormat.RGBA32, true) { wrapMode = TextureWrapMode.Clamp, name = "WakeSplashEffects dot" };
             var px = new Color32[N * N];
             for (int j = 0; j < N; j++)
                 for (int i = 0; i < N; i++)
@@ -3579,7 +3579,7 @@ namespace WaterWakes
         private static Texture2D StreakTexture()
         {
             const int T = 64;
-            var tex = new Texture2D(2 * T, 2 * T, TextureFormat.RGBA32, true) { wrapMode = TextureWrapMode.Clamp, name = "WaterWakes streak" };
+            var tex = new Texture2D(2 * T, 2 * T, TextureFormat.RGBA32, true) { wrapMode = TextureWrapMode.Clamp, name = "WakeSplashEffects streak" };
             var px = new Color32[4 * T * T];
             for (int tile = 0; tile < 4; tile++)
             {
@@ -3601,14 +3601,14 @@ namespace WaterWakes
             return tex;
         }
 
-        // the crisp sheet's blobs (WaterWakes/Spray): a 2x2 sheet, each R a height field (a round body, finely streaked
+        // the crisp sheet's blobs (WakeSplashEffects/Spray): a 2x2 sheet, each R a height field (a round body, finely streaked
         // along its length (u, the stretched billboard's), ragged at its edge) eroded by a rising threshold, G the streaks.
         // Drops over it and round it (bumps a little longer along u, as high as the body or higher): a fringe of them at
         // its edge from the start, and what is left of it as it erodes, so the sheet reads as water breaking into drops
         private static Texture2D ErodeTexture()
         {
             const int T = 256;
-            var tex = new Texture2D(2 * T, 2 * T, TextureFormat.RGBA32, true, true) { wrapMode = TextureWrapMode.Clamp, name = "WaterWakes erode" };
+            var tex = new Texture2D(2 * T, 2 * T, TextureFormat.RGBA32, true, true) { wrapMode = TextureWrapMode.Clamp, name = "WakeSplashEffects erode" };
             var px = new Color32[4 * T * T];
             var hh = new float[T * T];
             var gg = new float[T * T];
@@ -3658,7 +3658,7 @@ namespace WaterWakes
         private static Texture2D PuffTexture()
         {
             const int T = 128;
-            var tex = new Texture2D(2 * T, 2 * T, TextureFormat.RGBA32, true) { wrapMode = TextureWrapMode.Clamp, name = "WaterWakes puff" };
+            var tex = new Texture2D(2 * T, 2 * T, TextureFormat.RGBA32, true) { wrapMode = TextureWrapMode.Clamp, name = "WakeSplashEffects puff" };
             var px = new Color32[4 * T * T];
             for (int tile = 0; tile < 4; tile++)
             {
@@ -3685,7 +3685,7 @@ namespace WaterWakes
         private static Texture2D MistTexture()
         {
             const int N = 64;
-            var tex = new Texture2D(N, N, TextureFormat.RGBA32, true) { wrapMode = TextureWrapMode.Clamp, name = "WaterWakes mist" };
+            var tex = new Texture2D(N, N, TextureFormat.RGBA32, true) { wrapMode = TextureWrapMode.Clamp, name = "WakeSplashEffects mist" };
             var px = new Color32[N * N];
             for (int j = 0; j < N; j++)
                 for (int i = 0; i < N; i++)

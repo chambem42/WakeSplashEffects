@@ -1,7 +1,7 @@
 // The legacy particle shaders (Particles/Alpha Blended, Particles/Additive: blend set by _SrcBlend / _DstBlend) with
-// soft particles, for WaterWakes' spray, mist and haze over Scatterer's forward ocean: there the depth test is done by
+// soft particles, for WakeSplashEffects' spray, mist and haze over Scatterer's forward ocean: there the depth test is done by
 // hand (ZTest Always, _WWManualZ 1), so the waves fade the puffs rather than cut them (WakeOcean.cginc).
-Shader "WaterWakes/SoftParticle"
+Shader "WakeSplashEffects/SoftParticle"
 {
     Properties
     {

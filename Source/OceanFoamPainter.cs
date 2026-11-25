@@ -7,7 +7,7 @@ using Unity.Collections;
 using UnityEngine;
 using UnityEngine.Rendering;
 
-namespace WaterWakes
+namespace WakeSplashEffects
 {
     /// <summary>
     /// Paints foam into Scatterer's ocean gbuffer: on each camera rendering Scatterer's ocean this frame, a command buffer
@@ -61,10 +61,10 @@ namespace WaterWakes
             if (!loadTried)
             {
                 loadTried = true;
-                shader = WakeShaders.Get("WaterWakes/OceanFoam");
-                testShader = WakeShaders.Get("WaterWakes/Test");
-                mapShader = WakeShaders.Get("WaterWakes/FoamMap");
-                Debug.Log($"[WaterWakes] ocean foam shader {(shader == null ? "NOT loaded from " + WakeShaders.BundlePath : shader.name)}");
+                shader = WakeShaders.Get("WakeSplashEffects/OceanFoam");
+                testShader = WakeShaders.Get("WakeSplashEffects/Test");
+                mapShader = WakeShaders.Get("WakeSplashEffects/FoamMap");
+                Debug.Log($"[WakeSplashEffects] ocean foam shader {(shader == null ? "NOT loaded from " + WakeShaders.BundlePath : shader.name)}");
             }
             Type T(string n) => AssemblyLoader.loadedAssemblies.Select(a => a.assembly.GetType(n)).FirstOrDefault(t => t != null);
             oceanCbType = T("Scatterer.OceanCommandBuffer");
@@ -82,12 +82,12 @@ namespace WaterWakes
                 mat = ForwardOceanHook.Mat;
                 Camera.onPreRender += PreRender;
                 Camera.onPostRender += PostRender;
-                Debug.Log("[WaterWakes] ocean foam painting on (Scatterer's forward ocean)");
+                Debug.Log("[WakeSplashEffects] ocean foam painting on (Scatterer's forward ocean)");
                 return;
             }
             if (shader == null || renderingEnabled == null || orderedAdd == null)
             {
-                Debug.Log($"[WaterWakes] ocean foam painting off (Scatterer ocean {(oceanCbType == null ? "not found" : renderingEnabled == null ? "not as expected" : "forward, and its hook not placed (needs Harmony)")})");
+                Debug.Log($"[WakeSplashEffects] ocean foam painting off (Scatterer ocean {(oceanCbType == null ? "not found" : renderingEnabled == null ? "not as expected" : "forward, and its hook not placed (needs Harmony)")})");
                 painterOff = true;
                 enabled = Cfg.paintDebugToggle;   // (its debug screenshots still wanted)
                 return;
@@ -99,7 +99,7 @@ namespace WaterWakes
             Camera.onPreCull += PreCull;
             Camera.onPreRender += PreRender;
             Camera.onPostRender += PostRender;
-            Debug.Log($"[WaterWakes] ocean foam painting on (ordered hook {(orderedAdd != null ? "found" : "missing")})");
+            Debug.Log($"[WakeSplashEffects] ocean foam painting on (ordered hook {(orderedAdd != null ? "found" : "missing")})");
         }
 
         private void OnDestroy()
@@ -165,7 +165,7 @@ namespace WaterWakes
                     if (l.type == LightType.Directional && l.isActiveAndEnabled && (sun == null || l.intensity > sun.intensity))
                         sun = l;
                 if (sun != null)
-                    Debug.Log($"[WaterWakes] forward ocean lit by {sun.name}: colour {sun.color}, intensity {sun.intensity:F2}; ambient {RenderSettings.ambientLight}");
+                    Debug.Log($"[WakeSplashEffects] forward ocean lit by {sun.name}: colour {sun.color}, intensity {sun.intensity:F2}; ambient {RenderSettings.ambientLight}");
             }
             Color c = sun != null ? sun.color * sun.intensity : Color.white;
             Vector3 toSun = sun != null ? -sun.transform.forward : Vector3.up;
@@ -274,7 +274,7 @@ namespace WaterWakes
             if (state != wavesState)
             {
                 wavesState = state;
-                Debug.Log("[WaterWakes] forward ocean foam lit by " + (state == 0
+                Debug.Log("[WakeSplashEffects] forward ocean foam lit by " + (state == 0
                     ? $"Scatterer's wave slopes (grids {gridField.GetValue(oceanNode)}, chop {chopField.GetValue(oceanNode)})"
                     : "the ocean mesh's depth: " + (state == 1 ? "its ocean node's fields not found" : state == 2 ? "no ocean node for " + main?.name : "its wave maps not made yet")));
             }
@@ -293,13 +293,13 @@ namespace WaterWakes
             if (on && hiddenLayer < 0)
             {
                 hiddenLayer = FindHiddenLayer();
-                Debug.Log($"[WaterWakes] foam map layer {hiddenLayer} ({(hiddenLayer < 0 ? "none free: painting off" : LayerMask.LayerToName(hiddenLayer))})");
+                Debug.Log($"[WakeSplashEffects] foam map layer {hiddenLayer} ({(hiddenLayer < 0 ? "none free: painting off" : LayerMask.LayerToName(hiddenLayer))})");
             }
             on &= hiddenLayer >= 0;
             if (on != painting)
             {
                 painting = on;
-                Debug.Log($"[WaterWakes] painting foam on the ocean: {on}");
+                Debug.Log($"[WakeSplashEffects] painting foam on the ocean: {on}");
             }
             // (the splash's foam and the hull's upwell too: draped over the waves, their own crisp look kept by FoamMap's _Crisp)
             foreach (ParticleSystem ps in new[] { foam, fx != null ? fx.SplashFoam : null, fx != null ? fx.UpwellFoam : null })
@@ -317,12 +317,12 @@ namespace WaterWakes
             {
                 if (map != null)
                     map.Release();
-                map = new RenderTexture(res, res, 0, MapFormat) { filterMode = FilterMode.Bilinear, wrapMode = TextureWrapMode.Clamp, name = "WaterWakes foam map" };
+                map = new RenderTexture(res, res, 0, MapFormat) { filterMode = FilterMode.Bilinear, wrapMode = TextureWrapMode.Clamp, name = "WakeSplashEffects foam map" };
                 map.Create();
             }
             if (mapCam == null)
             {
-                var go = new GameObject("WaterWakes foam map camera");
+                var go = new GameObject("WakeSplashEffects foam map camera");
                 mapCam = go.AddComponent<Camera>();
                 mapCam.enabled = false;
                 mapCam.orthographic = true;
@@ -374,7 +374,7 @@ namespace WaterWakes
                 if (nearMap != null)
                     nearMap.Release();
                 // (four channels: b the splash's whitewater share, FoamMap's _Churn)
-                nearMap = new RenderTexture(nres, nres, 0, RenderTextureFormat.ARGB32) { filterMode = FilterMode.Bilinear, wrapMode = TextureWrapMode.Clamp, name = "WaterWakes near foam map" };
+                nearMap = new RenderTexture(nres, nres, 0, RenderTextureFormat.ARGB32) { filterMode = FilterMode.Bilinear, wrapMode = TextureWrapMode.Clamp, name = "WakeSplashEffects near foam map" };
                 nearMap.Create();
             }
             Vector3 look = centre, f3 = main.transform.forward;
@@ -401,7 +401,7 @@ namespace WaterWakes
         // each pass blitted into a small float texture and read back: does the shader run at all on this device?
         private void SelfTest()
         {
-            Debug.Log($"[WaterWakes] self-test: {SystemInfo.graphicsDeviceType} {SystemInfo.graphicsDeviceVersion}, shader passes {mat.passCount}, " +
+            Debug.Log($"[WakeSplashEffects] self-test: {SystemInfo.graphicsDeviceType} {SystemInfo.graphicsDeviceVersion}, shader passes {mat.passCount}, " +
                       $"reversed Z {SystemInfo.usesReversedZBuffer}");
             var rt = new RenderTexture(8, 4, 0, RenderTextureFormat.ARGBFloat) { filterMode = FilterMode.Point };
             rt.Create();
@@ -421,7 +421,7 @@ namespace WaterWakes
                 RenderTexture.active = rt;
                 tex.ReadPixels(new Rect(0, 0, 8, 4), 0, 0);
                 tex.Apply();
-                Debug.Log($"[WaterWakes] self-test {name} pass {pass} (supported {m.shader.isSupported}): px(0,0) {tex.GetPixel(0, 0)}, px(7,3) {tex.GetPixel(7, 3)}");
+                Debug.Log($"[WakeSplashEffects] self-test {name} pass {pass} (supported {m.shader.isSupported}): px(0,0) {tex.GetPixel(0, 0)}, px(7,3) {tex.GetPixel(7, 3)}");
             }
             RenderTexture.active = prev;
             rt.Release();
@@ -468,7 +468,7 @@ namespace WaterWakes
                     Directory.CreateDirectory(dir);
                     string f = Path.Combine(dir, $"ww_{shots++:00}_h{ShotHeadings[angle]:000}_{(toggleOff ? "off" : "on")}.png");
                     ScreenCapture.CaptureScreenshot(f);
-                    Debug.Log($"[WaterWakes] screenshot {f}");
+                    Debug.Log($"[WakeSplashEffects] screenshot {f}");
                 }
             }
             UpdateMap();
@@ -482,7 +482,7 @@ namespace WaterWakes
                     foreach (Renderer r in FindObjectsOfType<Renderer>())
                         if (r.gameObject.layer == hiddenLayer)
                             names.Add($"{r.name} ({r.GetType().Name}, {r.bounds.size.magnitude:F1} m, {(r.bounds.center - (FlightCamera.fetch != null ? FlightCamera.fetch.transform.position : Vector3.zero)).magnitude:F0} m away)");
-                    Debug.Log($"[WaterWakes] layer {hiddenLayer} renderers: {names.Count}: {string.Join("; ", names.Take(12))}");
+                    Debug.Log($"[WakeSplashEffects] layer {hiddenLayer} renderers: {names.Count}: {string.Join("; ", names.Take(12))}");
                 }
                 if (Cfg.paintHook < 0)
                     mode = (mode + 1) % 3;
@@ -563,7 +563,7 @@ namespace WaterWakes
                 return;
             if (!tintBuffers.TryGetValue(cam, out CommandBuffer tb))
             {
-                tintBuffers[cam] = tb = new CommandBuffer { name = "WaterWakes sim tint" };
+                tintBuffers[cam] = tb = new CommandBuffer { name = "WakeSplashEffects sim tint" };
                 tb.Blit((Texture)null, BuiltinRenderTextureType.CameraTarget, mat, 4);
             }
             cam.AddCommandBuffer(CameraEvent.AfterImageEffectsOpaque, tb);
@@ -580,7 +580,7 @@ namespace WaterWakes
                 return;
             if (!bubbleBuffers.TryGetValue(cam, out CommandBuffer bb))
             {
-                bubbleBuffers[cam] = bb = new CommandBuffer { name = "WaterWakes foam bubbles" };
+                bubbleBuffers[cam] = bb = new CommandBuffer { name = "WakeSplashEffects foam bubbles" };
                 bb.Blit((Texture)null, BuiltinRenderTextureType.CameraTarget, mat, 7);
             }
             cam.AddCommandBuffer(CameraEvent.AfterImageEffectsOpaque, bb);
@@ -713,14 +713,14 @@ namespace WaterWakes
         private CommandBuffer Record(Camera cam)
         {
             if (!buffers.TryGetValue(cam, out CommandBuffer cb))
-                buffers[cam] = cb = new CommandBuffer { name = "WaterWakes ocean foam" };
+                buffers[cam] = cb = new CommandBuffer { name = "WakeSplashEffects ocean foam" };
             cb.Clear();
             // our copy of the foam buffer, the camera's size (as Scatterer's)
             int w = cam.targetTexture != null ? cam.targetTexture.width : cam.pixelWidth;
             int h = cam.targetTexture != null ? cam.targetTexture.height : cam.pixelHeight;
             if (Cfg.paintFoam)
             {
-                RenderTexture copy = CameraSized(foamCopies, cam, w, h, RenderTextureFormat.R8, "WaterWakes ocean foam");
+                RenderTexture copy = CameraSized(foamCopies, cam, w, h, RenderTextureFormat.R8, "WakeSplashEffects ocean foam");
                 cb.Blit((Texture)null, copy, mat, 0);
                 cb.SetGlobalTexture(FoamId, copy);
             }
@@ -728,7 +728,7 @@ namespace WaterWakes
             bool simOn = WaveSim.Instance != null && WaveSim.Instance.Active;
             if (Cfg.waves && (waveCount > 0 || rippleCount > 0 || simOn) && mat.passCount > 3)
             {
-                RenderTexture nc = CameraSized(normalCopies, cam, w, h, RenderTextureFormat.ARGB2101010, "WaterWakes ocean normals");
+                RenderTexture nc = CameraSized(normalCopies, cam, w, h, RenderTextureFormat.ARGB2101010, "WakeSplashEffects ocean normals");
                 cb.Blit((Texture)null, nc, mat, 3);
                 cb.SetGlobalTexture(NormalsId, nc);
             }
@@ -777,14 +777,14 @@ namespace WaterWakes
                 if (v > max) max = v;
                 sum += v;
             }
-            Debug.Log($"[WaterWakes] foam map {r.width}x{r.height} (foam particles {(WakeFx.Instance != null && WakeFx.Instance.Foam != null ? WakeFx.Instance.Foam.particleCount : -1)}, layer {(WakeFx.Instance?.Foam != null ? WakeFx.Instance.Foam.gameObject.layer : -1)}): {lit} px lit ({100.0 * lit / px.Length:F2}%), max {max}, mean {(double)sum / px.Length:F2}");
+            Debug.Log($"[WakeSplashEffects] foam map {r.width}x{r.height} (foam particles {(WakeFx.Instance != null && WakeFx.Instance.Foam != null ? WakeFx.Instance.Foam.particleCount : -1)}, layer {(WakeFx.Instance?.Foam != null ? WakeFx.Instance.Foam.gameObject.layer : -1)}): {lit} px lit ({100.0 * lit / px.Length:F2}%), max {max}, mean {(double)sum / px.Length:F2}");
         }
 
         private void OnDiagB(AsyncGPUReadbackRequest r, string tag)
         {
             if (r.hasError || !haveA)
             {
-                Debug.Log($"[WaterWakes] diag readback failed ({r.hasError}), {tag}");
+                Debug.Log($"[WakeSplashEffects] diag readback failed ({r.hasError}), {tag}");
                 return;
             }
             NativeArray<Vector4> b = r.GetData<Vector4>();
@@ -824,7 +824,7 @@ namespace WaterWakes
                 return $"{l[l.Count / 20]:G4}/{l[l.Count / 2]:G4}/{l[l.Count * 19 / 20]:G4}";
             }
             string[] names = { "device f0", "device f1", "eye f0", "eye f1" };
-            Debug.Log($"[WaterWakes] diag {tag} (frames painted {framesPainted}): nonzero px of {b.Length}: oceanGbufferDepth {nz0}, ScattererDepthCopy {nz1}, " +
+            Debug.Log($"[WakeSplashEffects] diag {tag} (frames painted {framesPainted}): nonzero px of {b.Length}: oceanGbufferDepth {nz0}, ScattererDepthCopy {nz1}, " +
                       $"map at ocean px {nz2}, foam buffer {nz3}; p5/p50/p95 depth {Stat(depth)}, copy {Stat(copy)}, map at ocean px {Stat(normal)}, foam buffer {Stat(foam)}; " +
                       $"ocean heights ({cand[0].Count} px): " + string.Join("; ", Enumerable.Range(0, 4).Select(k => $"{names[k]} {Stat(cand[k])}")));
         }

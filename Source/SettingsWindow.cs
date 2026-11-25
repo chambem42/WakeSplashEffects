@@ -1,7 +1,7 @@
 using KSP.UI.Screens;
 using UnityEngine;
 
-namespace WaterWakes
+namespace WakeSplashEffects
 {
     /// <summary>The toolbar button and the settings window (flight scene). Changes apply live; Save keeps them.</summary>
     [KSPAddon(KSPAddon.Startup.Flight, false)]
@@ -12,7 +12,7 @@ namespace WaterWakes
         private bool open, uiHidden;
         private Rect rect;
         private Vector2 scroll;
-        private readonly int id = "WaterWakes.Settings".GetHashCode();
+        private readonly int id = "WakeSplashEffects.Settings".GetHashCode();
         private string status = "";
 
         private static WakeSettings S => WakeSettings.Current;
@@ -49,7 +49,7 @@ namespace WaterWakes
                                                                     ApplicationLauncher.AppScenes.FLIGHT, icon);
             if (open)
                 button.SetTrue(false);
-            Debug.Log("[WaterWakes] toolbar button added");
+            Debug.Log("[WakeSplashEffects] toolbar button added");
         }
 
         private void OnGUI()
@@ -57,7 +57,7 @@ namespace WaterWakes
             if (!open || (uiHidden && S.hideWithUI))
                 return;
             GUI.skin = HighLogic.Skin;
-            rect = GUILayout.Window(id, rect, Draw, "Water Wakes");
+            rect = GUILayout.Window(id, rect, Draw, "Wake Splash Effects");
             S.windowX = rect.x;
             S.windowY = rect.y;
         }

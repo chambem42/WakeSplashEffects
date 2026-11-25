@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
     <!--
-        Runs WaterWakes' in-game tests in KSP with dotnet test: every [UITest] in WaterWakes.KspTests is a test here. It
+        Runs WakeSplashEffects' in-game tests in KSP with dotnet test: every [UITest] in WakeSplashEffects.KspTests is a test here. It
         deploys the KspTest harness and the test assembly into a KSP instance with the mods below, starts KSP on a sandbox
         game with crafts/ in its save, and passes when the in-game test does.
     -->
@@ -23,7 +23,7 @@
     </ItemGroup>
 
     <ItemGroup>
-        <ProjectReference Include="..\WaterWakes.KspTests\WaterWakes.KspTests.csproj"
+        <ProjectReference Include="..\WakeSplashEffects.KspTests\WakeSplashEffects.KspTests.csproj"
                           ReferenceOutputAssembly="false" SkipGetTargetFrameworkProperties="true" OutputItemType="KspTestPlugin" />
     </ItemGroup>
 
@@ -33,8 +33,8 @@
              FAR pinned to a testing release (CKAN's testing channel) with the water model (#193) until a stable one has it -->
         <KspMod Include="FerramAerospaceResearchContinued=3:0.17.0.4;KSPBurst;ProceduralParts" />
         <KspOverlay Include="$(FarGameData)" Condition="'$(FarGameData)' != ''" />
-        <KspMod Include="..\..\GameData\WaterWakes" />
-        <KspMod Include="mods\WaterWakesTests" />
+        <KspMod Include="..\..\GameData\WakeSplashEffects" />
+        <KspMod Include="mods\WakeSplashEffectsTests" />
     </ItemGroup>
 
     <ItemGroup>

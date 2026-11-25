@@ -1,7 +1,7 @@
 // Foam painted into Scatterer's ocean gbuffer (oceanGbufferFoam, R8), between its geometry pass (AfterForwardOpaque) and
 // its shading pass (AfterImageEffectsOpaque), so Scatterer lights it on the displaced waves like its own whitecaps.
 // Each ocean pixel's world position comes from oceanGbufferDepth; the foam there from a top-down foam map.
-Shader "WaterWakes/OceanFoam"
+Shader "WakeSplashEffects/OceanFoam"
 {
     Properties
     {

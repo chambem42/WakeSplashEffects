@@ -1,6 +1,6 @@
 ship = Splash Sphere
 version = 1.2.0
-description = A 2.5 m ball for WaterWakes' splash tests: one ProceduralParts Ore tank, a Spine of round sections
+description = A 2.5 m ball for WakeSplashEffects' splash tests: one ProceduralParts Ore tank, a Spine of round sections
 type = VAB
 size = 2.5,2.5,2.5
 PART

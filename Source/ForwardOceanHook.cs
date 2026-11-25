@@ -6,7 +6,7 @@ using HarmonyLib;
 using UnityEngine;
 using UnityEngine.Rendering;
 
-namespace WaterWakes
+namespace WakeSplashEffects
 {
     /// <summary>
     /// Foam and wake waves on Scatterer's forward ocean (0.0878, the CKAN release, and before), which draws the whole sea
@@ -38,9 +38,9 @@ namespace WaterWakes
             {
                 if (mat == null)
                 {
-                    Shader sh = WakeShaders.Get("WaterWakes/OceanFoam");
+                    Shader sh = WakeShaders.Get("WakeSplashEffects/OceanFoam");
                     if (sh != null && sh.passCount > Pass)
-                        mat = new Material(sh) { name = "WaterWakes forward ocean" };
+                        mat = new Material(sh) { name = "WakeSplashEffects forward ocean" };
                 }
                 return mat;
             }
@@ -53,11 +53,11 @@ namespace WaterWakes
             MethodInfo recreate = AccessTools.Method(ocb, "RecreateCommandBuffer");
             if (cbField == null || depthField == null || recreate == null)
             {
-                Debug.Log("[WaterWakes] forward ocean hook off: Scatterer's OceanCommandBuffer is not as expected");
+                Debug.Log("[WakeSplashEffects] forward ocean hook off: Scatterer's OceanCommandBuffer is not as expected");
                 return;
             }
-            new Harmony("WaterWakes.ScattererForwardOcean").Patch(recreate, transpiler: new HarmonyMethod(typeof(ForwardOceanHook), nameof(Transpiler)));
-            Debug.Log($"[WaterWakes] forward ocean hook {(Patched ? "on" : "NOT placed (its Blit / DrawRenderer not found)")}");
+            new Harmony("WakeSplashEffects.ScattererForwardOcean").Patch(recreate, transpiler: new HarmonyMethod(typeof(ForwardOceanHook), nameof(Transpiler)));
+            Debug.Log($"[WakeSplashEffects] forward ocean hook {(Patched ? "on" : "NOT placed (its Blit / DrawRenderer not found)")}");
         }
 
         // after the first CommandBuffer.Blit (the depth copy initialised): this.BeforeOcean(); after the DrawRenderer (the
@@ -101,7 +101,7 @@ namespace WaterWakes
             }
             catch (Exception e)
             {
-                Debug.Log("[WaterWakes] forward ocean: depth copy not recorded: " + e.Message);
+                Debug.Log("[WakeSplashEffects] forward ocean: depth copy not recorded: " + e.Message);
             }
         }
 
@@ -123,11 +123,11 @@ namespace WaterWakes
                 cb.SetGlobalFloat("_WWOceanFade", 0.7f);
                 cb.ReleaseTemporaryRT(PreDepthId);
                 Recorded++;
-                Debug.Log($"[WaterWakes] forward ocean foam / waves recorded into Scatterer's ocean commands ({depth.width} x {depth.height})");
+                Debug.Log($"[WakeSplashEffects] forward ocean foam / waves recorded into Scatterer's ocean commands ({depth.width} x {depth.height})");
             }
             catch (Exception e)
             {
-                Debug.Log("[WaterWakes] forward ocean: pass not recorded: " + e.Message);
+                Debug.Log("[WakeSplashEffects] forward ocean: pass not recorded: " + e.Message);
             }
         }
     }

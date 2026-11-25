@@ -1,8 +1,8 @@
-# CKAN metadata, read by the NetKAN bot through the stub in KSP-CKAN/NetKAN (NetKAN/WaterWakes.netkan).
+# CKAN metadata, read by the NetKAN bot through the stub in KSP-CKAN/NetKAN (NetKAN/WakeSplashEffects.netkan).
 # Versions come from the GitHub release tags, KSP compatibility from the .version file in the release zip; name,
 # abstract (the repository's description), author and license (MIT, LICENSE.txt) from GitHub.
-identifier: WaterWakes
-$kref: '#/ckan/github/chambem42/WaterWakes'
+identifier: WakeSplashEffects
+$kref: '#/ckan/github/chambem42/WakeSplashEffects'
 $vref: '#/ckan/ksp-avc'
 tags:
   - plugin

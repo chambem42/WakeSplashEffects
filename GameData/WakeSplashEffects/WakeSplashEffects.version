@@ -1,16 +1,16 @@
 {
-    "NAME": "WaterWakes",
-    "URL": "https://raw.githubusercontent.com/chambem42/WaterWakes/main/GameData/WaterWakes/WaterWakes.version",
-    "DOWNLOAD": "https://github.com/chambem42/WaterWakes/releases",
+    "NAME": "WakeSplashEffects",
+    "URL": "https://raw.githubusercontent.com/chambem42/WakeSplashEffects/main/GameData/WakeSplashEffects/WakeSplashEffects.version",
+    "DOWNLOAD": "https://github.com/chambem42/WakeSplashEffects/releases",
     "GITHUB": {
         "USERNAME": "chambem42",
-        "REPOSITORY": "WaterWakes",
+        "REPOSITORY": "WakeSplashEffects",
         "ALLOW_PRE_RELEASE": false
     },
     "VERSION": {
         "MAJOR": 0,
         "MINOR": 1,
-        "PATCH": 0,
+        "PATCH": 1,
         "BUILD": 0
     },
     "KSP_VERSION": {

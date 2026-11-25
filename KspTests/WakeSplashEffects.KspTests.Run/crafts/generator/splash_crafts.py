@@ -1,4 +1,4 @@
-"""Makes WaterWakes' splash test crafts (SplashTests): a ProceduralParts Ore tank each (its ore, which the test sets,
+"""Makes WakeSplashEffects' splash test crafts (SplashTests): a ProceduralParts Ore tank each (its ore, which the test sets,
 makes its mass), from template.craft (FAR's Planing Box.craft), VAB crafts standing as they are to fall, written beside
 this folder (crafts/):
 
@@ -11,7 +11,7 @@ this folder (crafts/):
                                  submarine's size, 10 m across and 85.8 m long, lying level, nose to craft +x
 
 The upright three share a plan area (what faces the water from above), 4.91 m2, a 2.5 m disc's. Splash Apollo Pod.craft
-(the stock Mk1-3 pod at Apollo's size, mods/WaterWakesTests/ApolloPod.cfg) is made by hand.
+(the stock Mk1-3 pod at Apollo's size, mods/WakeSplashEffectsTests/ApolloPod.cfg) is made by hand.
 
     python splash_crafts.py
 
@@ -128,13 +128,13 @@ WEDGE = "-0.5,-0.5,-0.5,0.5"
 SIDE = "0,0,-0.707106781,0.707106781"
 
 CRAFTS = [
-    make("Splash Cylinder", "A plain cylinder for WaterWakes' splash tests: one ProceduralParts Ore tank, 2.5 m across, 4 m long, standing on its end",
+    make("Splash Cylinder", "A plain cylinder for WakeSplashEffects' splash tests: one ProceduralParts Ore tank, 2.5 m across, 4 m long, standing on its end",
          cylinder(2.5, 4.0), UPRIGHT, (2.5, 4.0, 2.5), 4.0),
-    make("Splash Sphere", "A 2.5 m ball for WaterWakes' splash tests: one ProceduralParts Ore tank, a Spine of round sections",
+    make("Splash Sphere", "A 2.5 m ball for WakeSplashEffects' splash tests: one ProceduralParts Ore tank, a Spine of round sections",
          sphere(2.5), UPRIGHT, (2.5, 2.5, 2.5), 2.5),
-    make("Splash Wedge", "A wedge for WaterWakes' splash tests: one ProceduralParts Ore tank, a triangular prism (2.5 m sides) 1.96 m long, lying edge down",
+    make("Splash Wedge", "A wedge for WakeSplashEffects' splash tests: one ProceduralParts Ore tank, a triangular prism (2.5 m sides) 1.96 m long, lying edge down",
          polygon(3, 2.5 * math.sqrt(3) / 2, 1.96), WEDGE, (1.96, 2.165, 2.5), 2.165),
-    make("Splash Submarine", "DARPA SUBOFF's bare hull at a real submarine's size (10 m across, 85.8 m long) for WaterWakes' splash tests: one "
+    make("Splash Submarine", "DARPA SUBOFF's bare hull at a real submarine's size (10 m across, 85.8 m long) for WakeSplashEffects' splash tests: one "
          "ProceduralParts Ore tank, a Spine, lying level", spine(*submarine_nodes()), SIDE, (submarine_nodes()[0], SUB_D, SUB_D), SUB_D),
 ]
 

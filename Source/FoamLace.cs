@@ -2,7 +2,7 @@ using System;
 using System.Threading.Tasks;
 using UnityEngine;
 
-namespace WaterWakes
+namespace WakeSplashEffects
 {
     /// <summary>
     /// The texture the surface foam is laid out from on the ocean (OceanFoam's SurfaceFoam): made once, tiling, from
@@ -36,7 +36,7 @@ namespace WaterWakes
                     return null;
                 if (job.IsFaulted)
                 {
-                    Debug.Log($"[WaterWakes] foam lace texture failed: {job.Exception?.GetBaseException().Message}");
+                    Debug.Log($"[WakeSplashEffects] foam lace texture failed: {job.Exception?.GetBaseException().Message}");
                     job = Task.FromResult<Color32[]>(null);
                     tex = new Texture2D(1, 1);   // (plain from here on: a flat mid grey)
                     tex.SetPixel(0, 0, new Color(0.5f, 0.5f, 0.5f, 1));
@@ -82,13 +82,13 @@ namespace WaterWakes
             int n = Size;
             var t = new Texture2D(n, n, TextureFormat.RGBA32, true, true)
             {
-                wrapMode = TextureWrapMode.Repeat, filterMode = FilterMode.Trilinear, anisoLevel = 4, name = "WaterWakes foam lace"
+                wrapMode = TextureWrapMode.Repeat, filterMode = FilterMode.Trilinear, anisoLevel = 4, name = "WakeSplashEffects foam lace"
             };
             t.SetPixels32(px);
             t.Apply(true, true);
-            Debug.Log($"[WaterWakes] foam lace texture {n}x{n} made in {(DateTime.Now - t0).TotalSeconds:F2} s");
+            Debug.Log($"[WakeSplashEffects] foam lace texture {n}x{n} made in {(DateTime.Now - t0).TotalSeconds:F2} s");
             // (diagnostic: the texture written there as a binary PPM, its r g b)
-            string dump = Environment.GetEnvironmentVariable("WATERWAKES_DUMP_LACE");
+            string dump = Environment.GetEnvironmentVariable("WAKESPLASHEFFECTS_DUMP_LACE");
             if (!string.IsNullOrEmpty(dump))
             {
                 byte[] head = System.Text.Encoding.ASCII.GetBytes($"P6\n{n} {n}\n255\n");

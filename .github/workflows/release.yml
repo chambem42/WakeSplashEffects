@@ -32,8 +32,8 @@ jobs:
         env:
           TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
         run: |
-          v=$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' Source/WaterWakes.csproj | head -1)
-          [ -n "$v" ] || { echo "::error::no <Version> in Source/WaterWakes.csproj"; exit 1; }
+          v=$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' Source/WakeSplashEffects.csproj | head -1)
+          [ -n "$v" ] || { echo "::error::no <Version> in Source/WakeSplashEffects.csproj"; exit 1; }
           if [ -n "$TAG" ] && [ "$TAG" != "v$v" ]; then
             echo "::error::tag $TAG, but the csproj's version is $v (tag v$v)"; exit 1
           fi
@@ -50,8 +50,8 @@ jobs:
       id-token: write
     secrets: inherit
     with:
-      test-project: KspTests/WaterWakes.KspTests.Run
-      title: WaterWakes in-game tests
+      test-project: KspTests/WakeSplashEffects.KspTests.Run
+      title: WakeSplashEffects in-game tests
       legs: '["windows", "linux"]'
       shards: 3
       mods: Harmony2
@@ -68,7 +68,7 @@ jobs:
       run:
         shell: bash
     env:
-      ZIP: dist/WaterWakes-${{ needs.version.outputs.version }}.zip
+      ZIP: dist/WakeSplashEffects-${{ needs.version.outputs.version }}.zip
     steps:
       - uses: actions/checkout@v6
         with:
@@ -84,7 +84,7 @@ jobs:
         run: powershell -NoProfile -File tools/package.ps1
       - uses: actions/upload-artifact@v6
         with:
-          name: WaterWakes-${{ needs.version.outputs.version }}
+          name: WakeSplashEffects-${{ needs.version.outputs.version }}
           path: ${{ env.ZIP }}
           if-no-files-found: error
       - name: GitHub release

@@ -2,14 +2,14 @@ using System.Collections.Generic;
 using System.IO;
 using UnityEngine;
 
-namespace WaterWakes
+namespace WakeSplashEffects
 {
-    /// <summary>The mod's shaders (GameData/WaterWakes/Shaders/waterwakes.shaders), loaded once for the game session.</summary>
+    /// <summary>The mod's shaders (GameData/WakeSplashEffects/Shaders/wakesplasheffects.shaders), loaded once for the game session.</summary>
     public static class WakeShaders
     {
         private static Dictionary<string, Shader> shaders;
 
-        public static string BundlePath => Path.Combine(KSPUtil.ApplicationRootPath, "GameData", "WaterWakes", "Shaders", "waterwakes.shaders");
+        public static string BundlePath => Path.Combine(KSPUtil.ApplicationRootPath, "GameData", "WakeSplashEffects", "Shaders", "wakesplasheffects.shaders");
 
         /// <summary>The named shader, if the bundle has it and this device runs it; else null.</summary>
         public static Shader Get(string name)
@@ -29,7 +29,7 @@ namespace WaterWakes
                 foreach (Shader s in shaders.Values)
                     if (!s.isSupported)
                         unsupported.Add(s.name);
-                Debug.Log($"[WaterWakes] shaders ({SystemInfo.graphicsDeviceType}): " +
+                Debug.Log($"[WakeSplashEffects] shaders ({SystemInfo.graphicsDeviceType}): " +
                           (!loaded ? "none (no " + BundlePath + ")" : string.Join(", ", shaders.Keys)) +
                           (unsupported.Count > 0 ? "; not supported here: " + string.Join(", ", unsupported) : ""));
             }
