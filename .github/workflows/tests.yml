@@ -51,6 +51,9 @@ jobs:
       test-project: KspTests/WaterWakes.KspTests.Run
       title: WaterWakes in-game tests
       legs: '["windows", "linux"]'
+      # (each leg's tests dealt to 3 jobs: KSP under Windows' software renderer commits ~15 GB, and a session of five
+      # drops outgrew the runner's commit limit by the third)
+      shards: 3
       mods: Harmony2
       prepare: bash .github/ci/build.sh
       filter: ${{ inputs.filter }}
