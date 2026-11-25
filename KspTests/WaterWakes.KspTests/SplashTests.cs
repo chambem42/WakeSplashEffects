@@ -84,6 +84,60 @@ namespace WaterWakes.KspTests
             return off.Count == 0 ? null : $"{name}'s particles off their baseline: {string.Join("; ", off)}";
         }
 
+        [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+        private struct ProcessMemoryCounters
+        {
+            public uint cb, PageFaultCount;
+            public UIntPtr PeakWorkingSetSize, WorkingSetSize, QuotaPeakPagedPoolUsage, QuotaPagedPoolUsage,
+                QuotaPeakNonPagedPoolUsage, QuotaNonPagedPoolUsage, PagefileUsage, PeakPagefileUsage;
+        }
+
+        [System.Runtime.InteropServices.DllImport("psapi.dll")]
+        private static extern bool GetProcessMemoryInfo(IntPtr process, out ProcessMemoryCounters counters, uint size);
+
+        [System.Runtime.InteropServices.DllImport("kernel32.dll")]
+        private static extern IntPtr GetCurrentProcess();
+
+        /// <summary>The process's committed memory and working set (Mono's Process says 0 for both): Windows from psapi,
+        /// Linux from /proc/self/status.</summary>
+        private static string ProcessMemory()
+        {
+            const double MB = 1 << 20;
+            try
+            {
+                if (Application.platform == RuntimePlatform.WindowsPlayer)
+                {
+                    var c = new ProcessMemoryCounters { cb = (uint)System.Runtime.InteropServices.Marshal.SizeOf(typeof(ProcessMemoryCounters)) };
+                    if (GetProcessMemoryInfo(GetCurrentProcess(), out c, c.cb))
+                        return $"committed {c.PagefileUsage.ToUInt64() / MB:F0} MB (peak {c.PeakPagefileUsage.ToUInt64() / MB:F0}), working set {c.WorkingSetSize.ToUInt64() / MB:F0} MB";
+                }
+                else if (File.Exists("/proc/self/status"))
+                {
+                    var kb = File.ReadAllLines("/proc/self/status").Where(l => l.StartsWith("VmSize:") || l.StartsWith("VmRSS:"))
+                        .ToDictionary(l => l.Substring(0, l.IndexOf(':')), l => double.Parse(l.Substring(l.IndexOf(':') + 1).Trim().Split(' ')[0], CultureInfo.InvariantCulture));
+                    return $"virtual {kb["VmSize"] / 1024:F0} MB, resident {kb["VmRSS"] / 1024:F0} MB";
+                }
+            }
+            catch (Exception e)
+            {
+                return $"process memory unread ({e.GetType().Name})";
+            }
+            return "process memory unread";
+        }
+
+        /// <summary>The process's memory and what of Unity's could grow: managed heap, Unity's allocations, render
+        /// textures (their pixels), textures and meshes alive.</summary>
+        private static string MemoryUse()
+        {
+            var rts = Resources.FindObjectsOfTypeAll<RenderTexture>();
+            long rtBytes = rts.Sum(rt => (long)UnityEngine.Profiling.Profiler.GetRuntimeMemorySizeLong(rt));
+            const double MB = 1 << 20;
+            return $"{ProcessMemory()}, " +
+                   $"managed {GC.GetTotalMemory(false) / MB:F0} MB, Unity {UnityEngine.Profiling.Profiler.GetTotalAllocatedMemoryLong() / MB:F0} MB; " +
+                   $"{rts.Length} render textures ({rtBytes / MB:F0} MB), {Resources.FindObjectsOfTypeAll<Texture2D>().Length} textures, " +
+                   $"{Resources.FindObjectsOfTypeAll<Mesh>().Length} meshes";
+        }
+
         // what faces the water from above (m2): the upright cylinder, ball and wedge a 2.5 m disc's; the cylinder on its
         // side its 2.5 x 4 m; the pod its 3.91 m heat shield's
         private static double PlanArea(string name) =>
@@ -182,6 +236,17 @@ namespace WaterWakes.KspTests
                 QualitySettings.vSyncCount = 0;
                 Application.targetFrameRate = maxFps;
                 ctx.Record("maxFps", $"{maxFps} frames a second (vsync {vsyncWas} -> 0)");
+            }
+            // (frameDt=S: Unity's longest game step a frame, KSP's PHYSICS_FRAME_DT_LIMIT, for this run: below 1/S frames a
+            // second game time slows. A fresh install's 0.04 (25 frames a game second, as on a CI runner); the instance's own
+            // settings may say otherwise)
+            float frameDtWas = Time.maximumDeltaTime, frameDtSettingWas = GameSettings.PHYSICS_FRAME_DT_LIMIT;
+            double frameDt = ctx.ParamDouble("frameDt", 0);
+            if (frameDt > 0)
+            {
+                GameSettings.PHYSICS_FRAME_DT_LIMIT = (float)frameDt;
+                Time.maximumDeltaTime = (float)frameDt;
+                ctx.Record("frameDt", $"{frameDt:F3} s (was {frameDtWas:F3})");
             }
             GameObject recorderGo = null, anchorGo = null;
             // (param farSet=Name=value|Name=value: FAR's PartHydrodynamics static coefficients for this run, put back after)
@@ -419,6 +484,7 @@ namespace WaterWakes.KspTests
                                                F(rebound > double.MinValue ? rebound : double.NaN), F(tMin)) +
                                    string.Concat(WakeCounts.Kinds.Select(k => "," + WakeCounts.Get(emitted, k))) + "," + F(fps));
                     ctx.Record($"particles {mass:F0} t from {dropHeight:F0} m", $"{WakeCounts.Format(emitted)} ({fps:F0} frames a game second)");
+                    ctx.Record($"memory after {mass:F0} t from {dropHeight:F0} m", MemoryUse());
                     countsOff = CheckCounts(ctx, name, firstDrop, mass, dropHeight, emitted) ?? countsOff;
                     firstDrop = false;
                     ctx.Record($"drop {mass:F0} t from {dropHeight:F0} m", $"{m:F2} t ({m / volume:F2} x the water it displaces): {vImpact:F1} m/s at the water, {vAfter:F1} m/s 0.1 s later; peak deceleration {peakDecel:F1} g, " +
@@ -451,6 +517,8 @@ namespace WaterWakes.KspTests
                 CheatOptions.UnbreakableJoints = jointsWas;
                 QualitySettings.vSyncCount = vsyncWas;
                 Application.targetFrameRate = targetFpsWas;
+                GameSettings.PHYSICS_FRAME_DT_LIMIT = frameDtSettingWas;
+                Time.maximumDeltaTime = frameDtWas;
             }
         }
 
