@@ -5,9 +5,21 @@ taking off, capsules splashing down, submarines surfacing. Works on the stock oc
 
 - **Wakes:** a foam trail from each hull's bow and stern, strongest at the hump and fading as the hull gets onto the step
   and lifts off. Bow spray, spray sheets and mist at speed.
+
+https://github.com/user-attachments/assets/c0c56279-30ca-4dae-a5ac-7711df1cf1be
+
+https://github.com/user-attachments/assets/e073cf11-779b-411e-9043-d1134e91adbb
+
 - **Splashes:** anything that hits the water, from a belly flop or a touchdown to a capsule's splashdown: a spray skirt,
   the crown and the jet that follows, rings spreading out, and foam left behind. A breach when something comes up out
   of the water. With sound.
+  
+https://github.com/user-attachments/assets/bee5bd6f-0cf8-40e7-8bda-537c26994fa2
+
+https://github.com/user-attachments/assets/b5c4a384-6481-477f-9217-e6a14b13769d
+
+https://github.com/user-attachments/assets/72ebeec5-d35b-41fd-907a-4835c6f568dd
+  
 - **With Scatterer:** the foam is painted onto Scatterer's moving waves instead of floating over them, on both its
   deferred ocean (0.09xx) and its forward ocean (0.0878, CKAN's release). On the deferred ocean the wakes' waves are
   drawn into it too.
